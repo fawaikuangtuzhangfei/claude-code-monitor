@@ -29,6 +29,11 @@ fn list_sessions() -> Vec<Value> {
                 {
                     if let Some(hwnd) = v.get("win_hwnd").and_then(|x| x.as_i64()) {
                         if hwnd != 0 {
+                            // 终端窗口已不存在 = 会话所在终端被直接关掉（未触发 SessionEnd）→
+                            // 僵尸会话，剔除，避免看板永久残留一张假 RUN/DONE/WAIT。
+                            if !window_alive_windows(hwnd) {
+                                continue;
+                            }
                             let title = window_title_windows(hwnd);
                             if !title.is_empty() {
                                 if let Some(obj) = v.as_object_mut() {
@@ -126,6 +131,15 @@ end try
         .arg("-e")
         .arg(script)
         .spawn();
+}
+
+/// 终端窗口是否还存在（用于剔除终端已被关闭的僵尸会话）
+#[cfg(windows)]
+fn window_alive_windows(hwnd: i64) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+    let hwnd = HWND(hwnd as *mut _);
+    unsafe { IsWindow(hwnd).as_bool() }
 }
 
 #[cfg(windows)]

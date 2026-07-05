@@ -37,12 +37,14 @@ Claude Code 会话 ──(hook)──> emit-status.mjs ──原子写──> ~/
   |---|---|
   | `SessionStart` | ⚪ idle（空闲） |
   | `UserPromptSubmit` | 🟢 running（你刚下发任务） |
-  | `PreToolUse` / `PostToolUse` | 🟢 running（工具在跑 / 授权后恢复） |
-  | `Notification` / `PermissionRequest` | 🟡 waiting（等你输入或授权） |
-  | `SubagentStop` | 🟢 running（子任务停了，主会话通常还在跑） |
+  | `PreToolUse` / `PostToolUse` / `SubagentStop` | 保活：仅当在等待中才清成 🟢 running，否则不改状态 |
+  | `PermissionRequest` | 🟡 waiting（等你授权） |
+  | `Notification` | 运行中才算 🟡 waiting（真的需要输入）；一轮结束后的空闲提醒会被忽略，保持 🔵 done |
   | `Stop` | 🔵 done（一轮结束） |
   | `SessionEnd` | 删除文件，看板上自然消失 |
 
+- 状态判定对并发写做了兜底：保活事件不与 `Stop` 抢写（避免 done 被冲回 running），空闲提醒不会把 done 误翻成 waiting。
+- **僵尸清理**：直接关掉终端窗口（不触发 `SessionEnd`）时，Windows 下看板会检测到该终端窗口已不存在，自动移除对应卡片，不残留假状态。
 - 完全被动、只读；不改你的会话，也不接管开窗口。
 - 你现有的系统通知（Windows BurntToast / mac 通知）原样保留，看板是它的「汇总总览」。
 - **点卡片 = 把对应终端窗口切到前台**（见下）。

@@ -94,17 +94,22 @@ mkdirSync(monitorDir, { recursive: true });
 const outFile = join(monitorDir, `${sessionId}.json`);
 
 // event -> 状态。running/waiting/done/idle/closed
+// pretool/posttool/subagent-stop 是“保活/清 WAIT”事件：映射成 running，但下方 KEEPALIVE 逻辑
+// 会限制它们只在当前 waiting 时才真正写盘（否则直接退出），避免与紧随的 Stop→done 抢写。
 const STATUS_BY_EVENT = {
   'session-start': 'idle',
   prompt: 'running',
-  pretool: 'running',         // 工具将执行 = 恢复运行
-  posttool: 'running',        // 工具已执行完（= 已授权）→ 兜底清掉 WAIT
-  notification: 'waiting',
+  pretool: 'running',         // 工具将执行（保活/清 WAIT）
+  posttool: 'running',        // 工具已执行完（保活/清 WAIT）
+  notification: 'waiting',     // 运行中才算真 WAIT；结束后的空闲提醒会被下方逻辑忽略
   permission: 'waiting',
   stop: 'done',
-  'subagent-stop': 'running', // 子任务停了但主会话通常还在跑
+  'subagent-stop': 'running', // 子任务停了，主会话通常还在跑（保活）
   'session-end': 'closed',
 };
+
+// 这三类事件只负责“把 waiting 清成 running”，别的情况一律不写盘
+const KEEPALIVE = new Set(['pretool', 'posttool', 'subagent-stop']);
 
 const status = STATUS_BY_EVENT[EVENT] ?? 'idle';
 
@@ -118,6 +123,20 @@ if (status === 'closed') {
 let prev = {};
 if (existsSync(outFile)) {
   try { prev = JSON.parse(readFileSync(outFile, 'utf8')); } catch {}
+}
+
+// 保活类事件：仅当当前在 waiting 时才提升为 running（清掉权限 WAIT）；
+// 其余情况（已在 running / done / idle）状态无需变化，直接退出、绝不写盘 ——
+// 从根上避免与一轮结束时紧随而来的 Stop→done 并发抢写，把 DONE 冲回 RUN。
+if (KEEPALIVE.has(EVENT) && prev.status !== 'waiting') {
+  process.exit(0);
+}
+
+// Notification 事件有二义：① 运行中“需要授权/输入”=真 WAIT；② 一轮结束后闲置 60s 的空闲提醒
+// “Claude is waiting for you”——那其实是 DONE，球在用户这边，不该翻成 WAIT。
+// 用前一状态区分：只有当前在 running/waiting 才认作真 WAIT；已 done/idle 的忽略这条空闲提醒。
+if (EVENT === 'notification' && prev.status !== 'running' && prev.status !== 'waiting') {
+  process.exit(0);
 }
 
 const now = Date.now();
@@ -188,6 +207,17 @@ const record = {
   win_hwnd: winHwnd,
   window_title: windowTitle,
 };
+
+// 落盘前再确认一次：写 running/waiting 期间，若文件已被并发的 Stop 写成 done/closed
+// 且不比我们旧，就放弃本次写入，别把已经“结束”的状态盖回去（兜住极窄的并发窗口）。
+if (status === 'running' || status === 'waiting') {
+  try {
+    const cur = JSON.parse(readFileSync(outFile, 'utf8'));
+    if ((cur.status === 'done' || cur.status === 'closed') && (cur.updated_at || 0) >= now) {
+      process.exit(0);
+    }
+  } catch {}
+}
 
 // 原子写：先写临时文件再 rename，避免看板读到写一半的 JSON
 const tmpFile = `${outFile}.${process.pid}.tmp`;
