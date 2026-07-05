@@ -1,0 +1,7 @@
+# 统一换行符：仓库内一律存 LF，避免跨平台(Win/Mac)协作时的换行符噪音
+* text=auto eol=lf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.ico binary
+*.icns binary

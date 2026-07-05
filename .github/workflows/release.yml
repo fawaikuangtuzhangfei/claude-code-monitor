@@ -1,0 +1,68 @@
+name: Release
+
+# 推送形如 v0.1.0 的 tag 时触发：
+#   git tag v0.1.0 && git push origin v0.1.0
+# 会在 Windows + macOS 上构建安装器，并汇总上传到一个 GitHub Release 草稿。
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write # 创建 Release / 上传产物需要
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target universal-apple-darwin' # 一个包同时支持 Apple Silicon + Intel
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS 通用包需要两个 target；Windows 不需要额外 target
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install frontend deps
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Claude 看板 ${{ github.ref_name }}'
+          releaseBody: |
+            双击安装：
+            - Windows：`*-setup.exe`
+            - macOS：`.dmg`（未签名，首次打开右键→打开绕过 Gatekeeper）
+          releaseDraft: true # 先生成草稿，你确认后手动发布
+          prerelease: false
+          args: ${{ matrix.args }}
