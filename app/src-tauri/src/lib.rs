@@ -141,6 +141,64 @@ fn window_title_windows(hwnd: i64) -> String {
     String::from_utf16_lossy(&buf[..len as usize])
 }
 
+/// 清洗会话 id：只留 [A-Za-z0-9_-]，杜绝 ../ 路径穿越（与 hook 端规则一致）
+fn sanitize_id(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(128)
+        .collect();
+    if cleaned.is_empty() {
+        "unknown".into()
+    } else {
+        cleaned
+    }
+}
+
+/// 右键“移除卡片” -> 删除该会话状态文件（清洗 id，杜绝路径穿越；文件已不存在也算成功）
+#[tauri::command]
+fn remove_session(session_id: String) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("no home dir")?;
+    let path = home
+        .join(".claude")
+        .join("monitor")
+        .join(format!("{}.json", sanitize_id(&session_id)));
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 右键“打开项目目录” -> 用系统文件管理器打开会话 cwd
+#[tauri::command]
+fn open_dir(path: String) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("空路径".into());
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// 置顶开关（前端 📌 按钮调用）
 #[tauri::command]
 fn set_pin(app: tauri::AppHandle, on: bool) {
@@ -204,6 +262,7 @@ pub fn run() {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -221,6 +280,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_sessions,
             focus_session,
+            remove_session,
+            open_dir,
             set_pin,
             hide_win,
             set_win_height,

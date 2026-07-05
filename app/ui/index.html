@@ -20,7 +20,7 @@
         </div>
         <div id="readout" class="readout" data-tauri-drag-region></div>
         <div class="ctl">
-          <button id="boot" class="tb-btn" title="开机自启">⏻</button>
+          <button id="gear" class="tb-btn" title="设置">⚙</button>
           <button id="pin" class="tb-btn" title="置顶">▲</button>
           <button id="hide" class="tb-btn" title="隐藏到托盘">▁</button>
         </div>
@@ -29,6 +29,25 @@
       <main id="cards"></main>
       <div id="empty" class="empty hidden">
         <span class="empty-cursor">▮</span> 无运行中的会话
+      </div>
+
+      <!-- 设置下拉菜单（⚙）—— 开关走 data-k，逻辑在 main.js -->
+      <div id="menu" class="menu hidden">
+        <button class="menu-item" data-k="notify"><span class="mi-ico">🔔</span><span class="mi-label">状态通知</span><span class="mi-sw"></span></button>
+        <button class="menu-item" data-k="sound"><span class="mi-ico">🔊</span><span class="mi-label">提示音</span><span class="mi-sw"></span></button>
+        <button class="menu-item" data-k="autofocus"><span class="mi-ico">🎯</span><span class="mi-label">需输入时自动切窗</span><span class="mi-sw"></span></button>
+        <button class="menu-item" data-k="mini"><span class="mi-ico">🪟</span><span class="mi-label">迷你模式</span><span class="mi-sw"></span></button>
+        <div class="menu-div"></div>
+        <button class="menu-item" data-k="autostart"><span class="mi-ico">⏻</span><span class="mi-label">开机自启</span><span class="mi-sw"></span></button>
+      </div>
+
+      <!-- 卡片右键菜单 -->
+      <div id="ctx" class="ctx hidden">
+        <button class="ctx-item" data-a="focus">切到该终端</button>
+        <button class="ctx-item" data-a="opendir">打开项目目录</button>
+        <button class="ctx-item" data-a="copyid">复制会话 ID</button>
+        <div class="ctx-div"></div>
+        <button class="ctx-item danger" data-a="remove">移除卡片</button>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

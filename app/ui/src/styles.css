@@ -154,6 +154,14 @@ html, body {
   color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
   flex-shrink: 0;
 }
+.row .branch {
+  font-size: 9px; color: var(--ink-dim); flex-shrink: 0;
+  padding: 1px 5px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--hair);
+  white-space: nowrap; max-width: 96px; overflow: hidden; text-overflow: ellipsis;
+}
+.row .branch::before { content: "⑂ "; color: var(--ink-faint); }
+.row .branch:empty { display: none; }
 .row .sub {
   font-size: 10.5px; color: var(--ink-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -201,6 +209,74 @@ html, body {
 .empty-cursor { animation: blink 1.1s step-end infinite; color: var(--run); }
 @keyframes blink { 50% { opacity: 0; } }
 .hidden { display: none !important; }
+
+/* —— 状态变化闪烁（通知视觉）：叠一层描边脉冲，不改布局 —— */
+.row.flash-wait { animation: flashwait 1s ease-out 3; }
+.row.flash-done { animation: flashdone 0.8s ease-out 2; }
+@keyframes flashwait {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 178, 36, 0.55); }
+  100% { box-shadow: 0 0 0 8px rgba(255, 178, 36, 0); }
+}
+@keyframes flashdone {
+  0%   { box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.5); }
+  100% { box-shadow: 0 0 0 8px rgba(88, 166, 255, 0); }
+}
+
+/* ============================== 设置下拉菜单 ============================== */
+.menu {
+  position: absolute; z-index: 30; top: 40px; right: 10px;
+  min-width: 168px; padding: 5px;
+  background: rgba(16, 19, 25, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.7);
+  animation: menuin 0.14s ease both;
+}
+@keyframes menuin { from { opacity: 0; transform: translateY(-4px); } }
+.menu-item {
+  width: 100%; display: flex; align-items: center; gap: 9px;
+  padding: 7px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--ink); cursor: pointer;
+  font-family: var(--font-mono); font-size: 11.5px; text-align: left;
+}
+.menu-item:hover { background: rgba(255, 255, 255, 0.06); }
+.mi-ico { width: 15px; text-align: center; font-size: 12px; filter: grayscale(0.2); }
+.mi-label { flex: 1; }
+.mi-sw {
+  width: 26px; height: 15px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.12); position: relative; transition: background 0.16s;
+}
+.mi-sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #cdd6e2; transition: transform 0.16s;
+}
+.menu-item.on .mi-sw { background: var(--run); }
+.menu-item.on .mi-sw::after { transform: translateX(11px); }
+.menu-div { height: 1px; margin: 4px 6px; background: var(--hair); }
+
+/* ============================== 卡片右键菜单 ============================== */
+.ctx {
+  position: absolute; z-index: 40; min-width: 132px; padding: 4px;
+  background: rgba(16, 19, 25, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px;
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.7);
+  animation: menuin 0.1s ease both;
+}
+.ctx-item {
+  width: 100%; padding: 6px 9px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--ink); cursor: pointer;
+  font-family: var(--font-mono); font-size: 11.5px; text-align: left;
+}
+.ctx-item:hover { background: rgba(255, 255, 255, 0.07); }
+.ctx-item.danger { color: #ff6b6b; }
+.ctx-item.danger:hover { background: rgba(255, 107, 107, 0.12); }
+.ctx-div { height: 1px; margin: 3px 5px; background: var(--hair); }
+
+/* ============================== 迷你模式 ============================== */
+/* 折叠成一条：只留顶栏（含 WAIT/RUN/DONE 计数 + 呼吸信号灯），卡片全隐 */
+body.mini #cards,
+body.mini #empty { display: none !important; }
+body.mini #titlebar { border-bottom: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }

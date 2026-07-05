@@ -46,6 +46,19 @@ function captureWindowMac(title) {
   }
 }
 
+// 读取 cwd 所在的 git 分支（1.5s 超时；非 git 目录 / 无 git / 分离头静默返回空）
+function gitBranch(dir) {
+  try {
+    const out = execFileSync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'], {
+      encoding: 'utf8', timeout: 1500, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const b = String(out).trim();
+    return b && b !== 'HEAD' ? b : '';
+  } catch {
+    return '';
+  }
+}
+
 // 读取 stdin（hook 输入）。异步累积，Windows 管道下也可靠。
 function readStdin() {
   return new Promise((resolve) => {
@@ -117,6 +130,14 @@ if (status === 'running') {
   runningSince = null;
 }
 
+// waiting_since: 进入 waiting 时打点，用于前端显示“已等待时长”；离开 waiting 清掉
+let waitingSince = prev.waiting_since || null;
+if (status === 'waiting') {
+  if (prev.status !== 'waiting') waitingSince = now;
+} else {
+  waitingSince = null;
+}
+
 // 从 hook 输入里尽量捞一句“正在做什么”作为提示
 let lastPrompt = prev.last_prompt || '';
 if (EVENT === 'prompt' && typeof input.prompt === 'string') {
@@ -128,6 +149,13 @@ if (EVENT === 'notification' && typeof input.message === 'string') {
 }
 
 const project = cwd ? basename(cwd) : 'unknown';
+
+// git 分支：仅在 prompt / session-start 时探一次（避免每个工具调用都 fork git），其余复用旧值
+let gitBranchName = prev.git_branch || '';
+if (EVENT === 'prompt' || EVENT === 'session-start') {
+  const b = gitBranch(cwd);
+  if (b) gitBranchName = b;
+}
 
 // 捕获终端窗口信息。
 // prompt: 每次都重抓前台窗口（你在哪个窗口按回车就锁哪个，WT 多窗口也能区分）。
@@ -152,6 +180,8 @@ const record = {
   status,
   updated_at: now,
   running_since: runningSince,
+  waiting_since: waitingSince,
+  git_branch: gitBranchName,
   last_prompt: lastPrompt,
   message,
   transcript_path: transcriptPath,
