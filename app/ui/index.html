@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude 看板</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="corner tl" aria-hidden="true"></div>
+      <div class="corner tr" aria-hidden="true"></div>
+      <div class="corner bl" aria-hidden="true"></div>
+      <div class="corner br" aria-hidden="true"></div>
+
+      <header id="titlebar" data-tauri-drag-region>
+        <div class="brand" data-tauri-drag-region>
+          <span id="sig" class="sig"></span>
+          <span class="brand-name" data-tauri-drag-region>CLAUDE<span class="dot-sep">·</span>MON</span>
+        </div>
+        <div id="readout" class="readout" data-tauri-drag-region></div>
+        <div class="ctl">
+          <button id="pin" class="tb-btn" title="置顶">▲</button>
+          <button id="hide" class="tb-btn" title="隐藏到托盘">▁</button>
+        </div>
+      </header>
+
+      <main id="cards"></main>
+      <div id="empty" class="empty hidden">
+        <span class="empty-cursor">▮</span> 无运行中的会话
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

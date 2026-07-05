@@ -1,0 +1,31 @@
+# ── Dependencies ──
+node_modules/
+
+# ── Rust / Tauri build output (体积巨大，切勿提交) ──
+target/
+
+# ── Tauri 自动生成的 schema/ACL（构建时重新生成） ──
+/app/src-tauri/gen/
+
+# ── 构建产物 ──
+*.msi
+*.dmg
+*-setup.exe
+
+# ── 运行期状态（本机数据，不该进仓库） ──
+.claude/monitor/
+
+# ── 日志 ──
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ── 操作系统 / 编辑器 ──
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── 环境变量 ──
+.env
+.env.*
