@@ -197,5 +197,19 @@ document.getElementById("hide").addEventListener("click", async () => {
   catch (e) { console.warn("hide failed:", e); }
 });
 
+// —— 开机自启开关（⏻）——
+const bootBtn = document.getElementById("boot");
+function reflectBoot(on) {
+  bootBtn.classList.toggle("active", on);
+  bootBtn.title = on ? "开机自启：开（点击关闭）" : "开机自启：关（点击开启）";
+}
+invoke("get_autostart").then(reflectBoot).catch(() => {});
+bootBtn.addEventListener("click", async () => {
+  const next = !bootBtn.classList.contains("active");
+  reflectBoot(next); // 乐观更新
+  try { await invoke("set_autostart", { on: next }); }
+  catch (e) { console.warn("set_autostart failed:", e); reflectBoot(!next); }
+});
+
 tick();
 setInterval(tick, 1000);

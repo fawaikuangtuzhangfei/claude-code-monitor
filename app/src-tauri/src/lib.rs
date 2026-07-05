@@ -157,6 +157,25 @@ fn hide_win(app: tauri::AppHandle) {
     }
 }
 
+/// 开机自启：查询当前状态（前端 ⏻ 按钮加载时读一次）
+#[tauri::command]
+fn get_autostart(app: tauri::AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// 开机自启：开/关（前端 ⏻ 按钮点击时调用）
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, on: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let m = app.autolaunch();
+    if on {
+        let _ = m.enable();
+    } else {
+        let _ = m.disable();
+    }
+}
+
 /// 自适应高度：前端按卡片数量算出所需逻辑高度，这里保持宽度只改高度
 #[tauri::command]
 fn set_win_height(app: tauri::AppHandle, height: f64) {
@@ -204,7 +223,9 @@ pub fn run() {
             focus_session,
             set_pin,
             hide_win,
-            set_win_height
+            set_win_height,
+            get_autostart,
+            set_autostart
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "显示看板", true, None::<&str>)?;
@@ -243,9 +264,18 @@ pub fn run() {
             // 注册全局快捷键 Ctrl+Alt+C 唤出看板
             let _ = app.global_shortcut().register("CmdOrControl+Alt+C");
 
-            // 开机自启（幂等；用户可后续在系统里关掉）
-            let autostart = app.autolaunch();
-            let _ = autostart.enable();
+            // 开机自启：仅首次运行默认开启；之后尊重用户在看板里 ⏻ 的开关
+            if let Some(marker) =
+                dirs::home_dir().map(|h| h.join(".claude").join("monitor").join(".autostart-init"))
+            {
+                if !marker.exists() {
+                    let _ = app.autolaunch().enable();
+                    if let Some(p) = marker.parent() {
+                        let _ = std::fs::create_dir_all(p);
+                    }
+                    let _ = std::fs::write(&marker, "1");
+                }
+            }
 
             Ok(())
         })
