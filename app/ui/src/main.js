@@ -169,7 +169,8 @@ function updateRow(el, s) {
   el.className = `row ${s.status}${focusable ? " focusable" : ""}`;
   el.title = `${s.cwd || ""}${focusable ? "  —  点击切到该终端 / 右键更多" : ""}`;
   const r = el._refs;
-  const name = nameOf(s), sub = subOf(s), side = sideOf(s), branch = s.git_branch || "";
+  const name = nameOf(s) + (s.__dupId ? ` #${s.__dupId}` : "");
+  const sub = subOf(s), side = sideOf(s), branch = s.git_branch || "";
   if (r.name.textContent !== name) r.name.textContent = name;
   if (r.tag.textContent !== meta.tag) r.tag.textContent = meta.tag;
   if (r.branch.textContent !== branch) r.branch.textContent = branch;
@@ -179,6 +180,12 @@ function updateRow(el, s) {
 
 function render(sessions) {
   sessions.forEach((s) => (s.__id = s.session_id));
+
+  // 同名会话（term_title / 项目名相同）加个短 session id 后缀，避免多开时分不清谁是谁
+  const nameCount = {};
+  sessions.forEach((s) => { const n = nameOf(s); nameCount[n] = (nameCount[n] || 0) + 1; });
+  sessions.forEach((s) => { s.__dupId = nameCount[nameOf(s)] > 1 ? String(s.session_id).slice(0, 4) : ""; });
+
   sessions.sort((a, b) => {
     const oa = STATUS_META[a.status]?.order ?? 9;
     const ob = STATUS_META[b.status]?.order ?? 9;

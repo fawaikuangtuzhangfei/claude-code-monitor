@@ -139,6 +139,12 @@ if (EVENT === 'notification' && prev.status !== 'running' && prev.status !== 'wa
   process.exit(0);
 }
 
+// SessionStart 的 compact 只是上下文压缩、不是新会话，别把进行中的状态重置成 idle（会闪一帧）。
+// startup / resume / clear 仍照常走 idle。
+if (EVENT === 'session-start' && input.source === 'compact') {
+  process.exit(0);
+}
+
 const now = Date.now();
 
 // running_since: 进入 running 时打点，用于前端算耗时；离开 running 清掉
@@ -166,6 +172,8 @@ let message = prev.message || '';
 if (EVENT === 'notification' && typeof input.message === 'string') {
   message = input.message.replace(/\s+/g, ' ').trim().slice(0, 120);
 }
+// 离开 waiting 就清掉提示语，避免下一次 WAIT（尤其是权限 WAIT）沿用上一条旧文案
+if (status !== 'waiting') message = '';
 
 const project = cwd ? basename(cwd) : 'unknown';
 
@@ -176,12 +184,12 @@ if (EVENT === 'prompt' || EVENT === 'session-start') {
   if (b) gitBranchName = b;
 }
 
-// 捕获终端窗口信息。
-// prompt: 每次都重抓前台窗口（你在哪个窗口按回车就锁哪个，WT 多窗口也能区分）。
-// session-start: 尚未捕获时抓一次。
+// 捕获终端窗口信息。win-capture.ps1 要起 PowerShell（~0.5s），而 UserPromptSubmit 会阻塞发送，
+// 所以别每个 prompt 都抓：session-start 时抓（含 resume/clear，能跟上换窗口）；prompt 仅在还没抓到时补一次。
+// 会话固定在一个终端里，抓一次即可；换终端会由新的 session-start 重新抓。
 let winHwnd = prev.win_hwnd || null;
 let windowTitle = prev.window_title || '';
-if (EVENT === 'prompt' || (EVENT === 'session-start' && !winHwnd)) {
+if (EVENT === 'session-start' || (EVENT === 'prompt' && !winHwnd)) {
   if (process.platform === 'win32') {
     const h = captureWindowWin();
     if (h) winHwnd = h;
