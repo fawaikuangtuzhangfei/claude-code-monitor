@@ -20,6 +20,7 @@ const EVENT = (process.argv[2] || '').toLowerCase();
 
 // —— 捕获“承载本会话的终端窗口”，供看板点击卡片时聚焦 ——
 // Windows：沿进程树找到终端窗口 HWND（确定性，不依赖焦点）
+// 返回 { hwnd, pid }：pid = 当前拥有该窗口的进程 id，供看板检测 HWND 被系统回收复用
 function captureWindowWin() {
   try {
     const out = execFileSync(
@@ -27,8 +28,11 @@ function captureWindowWin() {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(HERE, 'win-capture.ps1'), '-StartPid', String(process.pid)],
       { encoding: 'utf8', windowsHide: true, timeout: 6000 }
     );
-    const hwnd = parseInt(String(out).trim(), 10);
-    return Number.isFinite(hwnd) && hwnd > 0 ? hwnd : null;
+    const parts = String(out).trim().split(/\s+/);
+    const hwnd = parseInt(parts[0], 10);
+    const wpid = parseInt(parts[1], 10);
+    if (!Number.isFinite(hwnd) || hwnd <= 0) return null;
+    return { hwnd, pid: Number.isFinite(wpid) && wpid > 0 ? wpid : null };
   } catch {
     return null;
   }
@@ -188,11 +192,18 @@ if (EVENT === 'prompt' || EVENT === 'session-start') {
 // 所以别每个 prompt 都抓：session-start 时抓（含 resume/clear，能跟上换窗口）；prompt 仅在还没抓到时补一次。
 // 会话固定在一个终端里，抓一次即可；换终端会由新的 session-start 重新抓。
 let winHwnd = prev.win_hwnd || null;
+let winPid = prev.win_pid || null;
 let windowTitle = prev.window_title || '';
-if (EVENT === 'session-start' || (EVENT === 'prompt' && !winHwnd)) {
+// session-start 必抓；prompt 时若还没抓到窗口则补抓一次；
+// win32 下若已有 hwnd 但缺 win_pid（升级前捕获的老会话），也补抓一次，让 HWND 复用校验尽快生效。
+const needCapture =
+  EVENT === 'session-start' ||
+  (EVENT === 'prompt' && !winHwnd) ||
+  (EVENT === 'prompt' && process.platform === 'win32' && winHwnd && !winPid);
+if (needCapture) {
   if (process.platform === 'win32') {
-    const h = captureWindowWin();
-    if (h) winHwnd = h;
+    const cap = captureWindowWin();
+    if (cap) { winHwnd = cap.hwnd; winPid = cap.pid; }
   } else if (process.platform === 'darwin') {
     // 标题只用已清洗的 sessionId，避免把目录名里的 ESC/引号写进终端转义或 osascript
     windowTitle = windowTitle || `CLAUDEMON:${sessionId}`;
@@ -213,6 +224,7 @@ const record = {
   message,
   transcript_path: transcriptPath,
   win_hwnd: winHwnd,
+  win_pid: winPid,
   window_title: windowTitle,
 };
 

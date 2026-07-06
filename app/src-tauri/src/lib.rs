@@ -34,6 +34,21 @@ fn list_sessions() -> Vec<Value> {
                             if !window_alive_windows(hwnd) {
                                 continue;
                             }
+                            // IsWindow 还不够：Windows 会把关掉窗口的 HWND 号回收给别的窗口
+                            // （重启后尤为普遍），于是一堆早已关闭的会话卡片赖着不走。
+                            // 再校验“当前拥有该 HWND 的进程”是否仍是捕获时那个 pid：
+                            // 不一致 = 句柄已被复用 → 同样是僵尸，剔除。
+                            // （旧状态文件没有 win_pid 时跳过此校验，保持兼容。）
+                            if let Some(pid) = v.get("win_pid").and_then(|x| x.as_i64()) {
+                                if pid != 0 {
+                                    let cur = window_pid_windows(hwnd);
+                                    // 拿不到当前 pid（cur==0）时不据此判定，避免误删活会话；
+                                    // 只有确实取到且与捕获时不一致，才认定句柄已被复用。
+                                    if cur != 0 && cur as i64 != pid {
+                                        continue;
+                                    }
+                                }
+                            }
                             let title = window_title_windows(hwnd);
                             if !title.is_empty() {
                                 if let Some(obj) = v.as_object_mut() {
@@ -140,6 +155,19 @@ fn window_alive_windows(hwnd: i64) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::IsWindow;
     let hwnd = HWND(hwnd as *mut _);
     unsafe { IsWindow(hwnd).as_bool() }
+}
+
+/// 返回当前拥有该 HWND 的进程 pid（0 = 取不到）。用于识别 HWND 被系统回收复用的僵尸会话。
+#[cfg(windows)]
+fn window_pid_windows(hwnd: i64) -> u32 {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    let hwnd = HWND(hwnd as *mut _);
+    let mut pid: u32 = 0;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    pid
 }
 
 #[cfg(windows)]

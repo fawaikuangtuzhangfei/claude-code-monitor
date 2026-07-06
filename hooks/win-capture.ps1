@@ -6,7 +6,9 @@
 #      multiple windows share ONE WindowsTerminal.exe pid.
 #   2) Fallback: walk up the parent process chain from -StartPid and find an
 #      ancestor (or its child conhost) that owns a visible top-level window.
-# Prints hwnd (decimal) to stdout, or 0.
+# Prints "hwnd owningPid" (both decimal) to stdout, or "0 0".
+# owningPid lets the board detect HWND recycling (closed window's handle reused
+# by an unrelated window) instead of trusting IsWindow() alone.
 param([int]$StartPid)
 
 Add-Type @'
@@ -41,7 +43,7 @@ if ($fg -ne [IntPtr]::Zero) {
   [WinCap]::GetWindowThreadProcessId($fg, [ref]$fgPid) | Out-Null
   $pn = (Get-Process -Id $fgPid -ErrorAction SilentlyContinue).ProcessName
   if ($pn -and ($termNames -contains $pn)) {
-    Write-Output ([int64]$fg)
+    Write-Output ("{0} {1}" -f [int64]$fg, [int]$fgPid)
     return
   }
 }
@@ -69,4 +71,8 @@ for ($i = 0; $i -lt 15; $i++) {
   if ($procs.ContainsKey($parent) -and $skip -contains $procs[$parent].Name) { break }
   $cur = $parent
 }
-Write-Output ([int64]$hwnd)
+$outPid = 0
+if ($hwnd -ne [IntPtr]::Zero) {
+  [WinCap]::GetWindowThreadProcessId($hwnd, [ref]$outPid) | Out-Null
+}
+Write-Output ("{0} {1}" -f [int64]$hwnd, [int]$outPid)
