@@ -1,6 +1,6 @@
 [package]
 name = "claude-monitor"
-version = "0.2.3"
+version = "0.2.4"
 description = "Claude 会话看板"
 edition = "2021"
 license = "MIT"
@@ -20,6 +20,9 @@ tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

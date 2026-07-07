@@ -58,6 +58,20 @@ Claude Code 会话 ──(hook)──> emit-status.mjs ──原子写──> ~/
 
 ## 安装
 
+> ### ⚠️ macOS 首次打开：先过 Gatekeeper（否则「双击没反应 / 看板打不开」）
+>
+> Releases 里的 `.dmg` 是 **adhoc 签名、未做 Apple 公证**的。macOS 的 Gatekeeper 会拦下未公证应用，表现常常是**双击图标什么都不发生**（进程根本没起来），看板自然出不来。两种解法任选其一：
+>
+> **① 图形界面（最省事）**：在「访达」里找到 `Claude Monitor.app`（在「应用程序」里），**右键 → 打开**，弹窗里再点「打开」。只需这一次，之后双击 / 开机自启都正常。
+>
+> **② 命令行（一劳永逸）**：
+> ```bash
+> xattr -rd com.apple.quarantine "/Applications/Claude Monitor.app"   # 去掉下载隔离标记
+> codesign --force --deep --sign - "/Applications/Claude Monitor.app" # 打一个本机签名让系统放行
+> ```
+>
+> 如果打开后**看板进程在跑、但屏幕上找不到窗口**：按全局快捷键 **`Cmd+Alt+C`** 召回；窗口会按你当前主屏尺寸摆到右上角（v0.2.4 起已修复多屏/异分辨率下窗口跑到屏幕外的问题）。
+
 ### 前置
 - **Node.js**（发射器和安装脚本要用，v18+ 即可）
 - 构建看板需要 **Rust** 和平台工具：

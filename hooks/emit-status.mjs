@@ -50,6 +50,46 @@ function captureWindowMac(title) {
   }
 }
 
+// macOS：记录“承载本会话的进程”PID —— 从本 hook 进程向上找，跳过中间的 shell，
+// 取第一个非 shell 祖先（即 Claude Code 会话进程本身）。看板据此判断：这个进程若已
+// 不存在，说明终端标签/窗口被直接关掉（未触发 SessionEnd），对应卡片是僵尸，应剔除。
+// mac 没有 Windows 那套窗口存活检测，这是等价的兜底，且不会误删真在 waiting/idle 的会话。
+function captureOwnerPidMac() {
+  const shells = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'ksh', 'tcsh', 'csh', 'login', 'env']);
+  try {
+    let pid = process.ppid;
+    for (let i = 0; i < 10 && pid > 1; i++) {
+      const out = execFileSync('ps', ['-o', 'ppid=,comm=', '-p', String(pid)], {
+        encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      const m = out.match(/^\s*(\d+)\s+(.*)$/);
+      if (!m) break;
+      const parentPid = parseInt(m[1], 10);
+      // comm 可能是完整路径；取 basename，并去掉登录 shell 的前导 '-'（如 "-zsh"）
+      const comm = m[2].trim().split('/').pop().replace(/^-/, '');
+      if (!shells.has(comm)) return pid; // 第一个非 shell 祖先 = 会话进程
+      pid = parentPid;
+    }
+  } catch {}
+  return null;
+}
+
+// macOS：拿到会话所在“伪终端设备”路径（如 /dev/ttys012）。看板无法从外部精确聚焦
+// Ghostty 的某个 split，但可以往这个 tty 写一个 BEL，让 Ghostty 在对应 tab/分屏上亮
+// 提示、闪一下，帮你定位到具体那一格。ps 的 tty 列给出 ttysNNN；'??' 表示无控制终端。
+function captureTtyMac(pid) {
+  try {
+    const out = execFileSync('ps', ['-o', 'tty=', '-p', String(pid)], {
+      encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!out || out === '??' || out === '?') return null;
+    const dev = out.startsWith('/dev/') ? out : `/dev/${out}`;
+    return dev.startsWith('/dev/tty') ? dev : null; // 只认 /dev/tty*，防呆
+  } catch {
+    return null;
+  }
+}
+
 // 读取 cwd 所在的 git 分支（1.5s 超时；非 git 目录 / 无 git / 分离头静默返回空）
 function gitBranch(dir) {
   try {
@@ -194,11 +234,14 @@ if (EVENT === 'prompt' || EVENT === 'session-start') {
 let winHwnd = prev.win_hwnd || null;
 let winPid = prev.win_pid || null;
 let windowTitle = prev.window_title || '';
-// session-start 必抓；prompt 时若还没抓到窗口则补抓一次；
-// win32 下若已有 hwnd 但缺 win_pid（升级前捕获的老会话），也补抓一次，让 HWND 复用校验尽快生效。
+let ownerPid = prev.owner_pid || null;
+let tty = prev.tty || '';
+// session-start 必抓；prompt 时若还没抓到窗口/会话进程则补抓一次（darwin 靠 ownerPid 收口，
+// 别每个 prompt 都 fork ps）；win32 下若已有 hwnd 但缺 win_pid（升级前捕获的老会话），
+// 也补抓一次，让 HWND 复用校验尽快生效。
 const needCapture =
   EVENT === 'session-start' ||
-  (EVENT === 'prompt' && !winHwnd) ||
+  (EVENT === 'prompt' && !winHwnd && !ownerPid) ||
   (EVENT === 'prompt' && process.platform === 'win32' && winHwnd && !winPid);
 if (needCapture) {
   if (process.platform === 'win32') {
@@ -208,6 +251,10 @@ if (needCapture) {
     // 标题只用已清洗的 sessionId，避免把目录名里的 ESC/引号写进终端转义或 osascript
     windowTitle = windowTitle || `CLAUDEMON:${sessionId}`;
     captureWindowMac(windowTitle);
+    const p = captureOwnerPidMac();
+    if (p) ownerPid = p;
+    const t = captureTtyMac(ownerPid || process.pid);
+    if (t) tty = t;
   }
 }
 
@@ -226,6 +273,8 @@ const record = {
   win_hwnd: winHwnd,
   win_pid: winPid,
   window_title: windowTitle,
+  owner_pid: ownerPid,
+  tty,
 };
 
 // 落盘前再确认一次：写 running/waiting 期间，若文件已被并发的 Stop 写成 done/closed
