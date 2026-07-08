@@ -20,6 +20,14 @@ function invoke(cmd, args) {
   return Promise.reject(new Error("not in tauri"));
 }
 
+// 这个 webview 是哪块？固定看板(dock) 与浮窗(popover) 跑的是同一份代码，用窗口 label 区分。
+// 只有 dock 负责通知/提示音/托盘状态，避免两个窗口重复触发（弹两次 toast、响两声）。
+function currentLabel() {
+  try { return window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label || ""; }
+  catch { return ""; }
+}
+const IS_DOCK = (currentLabel() || "dock") === "dock";
+
 function elapsed(ms) {
   if (!ms) return "";
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
@@ -51,7 +59,7 @@ function sideOf(s) {
 }
 
 // ============================ 设置（本地持久化） ============================
-const DEFAULTS = { notify: true, sound: true, autofocus: false, mini: false };
+const DEFAULTS = { notify: true, sound: true, autofocus: false };
 let settings = loadSettings();
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("cm.settings") || "{}") }; }
@@ -128,6 +136,7 @@ function maybeNotify(el, s) {
   const prev = el._notifiedStatus;
   el._notifiedStatus = st;
   if (!primed || st === prev) return;
+  if (!IS_DOCK) return; // 通知/提示音只由固定看板发，浮窗不重复
   if (st === "waiting") fireAlert(el, s, "waiting");
   else if (st === "done") fireAlert(el, s, "done");
 }
@@ -235,14 +244,6 @@ let lastHeight = 0;
 let forcedHeight = false; // 浮层（设置/右键）把窗口临时撑高时置真，暂停自适应缩窗
 function autosize(n) {
   if (forcedHeight) return; // 别让每秒 tick 把撑高的窗口缩回去，导致浮层又被裁切
-  // 迷你模式：只留顶栏
-  if (document.body.classList.contains("mini")) {
-    const h = Math.ceil(titlebarEl.offsetHeight + 2);
-    if (Math.abs(h - lastHeight) < 2) return;
-    lastHeight = h;
-    invoke("set_win_height", { height: h }).catch(() => {});
-    return;
-  }
   // 量“自然内容高度”：逐行 offsetHeight 累加（不受 flex 拉伸影响，能缩回去）
   let cards = 16; // #cards 上下 padding 各 8
   const kids = cardsEl.children;
@@ -259,7 +260,7 @@ function autosize(n) {
 }
 
 // 打开浮层（设置/右键菜单）前，若它会超出当前窗口下沿，就临时把窗口撑高；关闭后还原。
-// 解决：迷你模式 / 只有极少卡片时窗口很矮，绝对定位的浮层被窗口裁掉只露一条。
+// 解决：只有极少卡片时窗口很矮，绝对定位的浮层被窗口裁掉只露一条。
 function forceHeightFor(el) {
   const need = Math.ceil(el.offsetTop + el.offsetHeight + 8);
   if (need > window.innerHeight) {
@@ -271,7 +272,7 @@ function forceHeightFor(el) {
 function restoreHeight() {
   if (!forcedHeight) return;
   forcedHeight = false;
-  lastHeight = 0; // 强制 autosize 重新下发，尊重迷你/卡片数量还原真实高度
+  lastHeight = 0; // 强制 autosize 重新下发，按卡片数量还原真实高度
   autosize(rows.size);
 }
 
@@ -282,8 +283,11 @@ function updateHeader(sessions) {
   const nDone = sessions.filter((s) => s.status === "done").length;
 
   const key = `${nWait}/${nRun}/${nDone}`;
-  if (key === lastHeaderKey) return; // 计数没变就不重绘头部
+  if (key === lastHeaderKey) return; // 计数没变就不重绘头部、也不打扰托盘
   lastHeaderKey = key;
+
+  // 把状态“上移”到托盘图标：Win 换红点图标、mac 菜单栏显示文字。仅计数变化时下发，且只由固定看板驱动。
+  if (IS_DOCK) invoke("set_tray_status", { nWait, nRun, nDone }).catch(() => {});
 
   sigEl.className = "sig" + (nWait ? " wait" : nRun ? " run" : "");
   readoutEl.innerHTML =
@@ -358,11 +362,6 @@ gearBtn.addEventListener("click", (e) => {
   menuEl.classList.contains("hidden") ? openMenu() : closeMenu();
 });
 
-function applyMini() {
-  document.body.classList.toggle("mini", settings.mini);
-  autosize(rows.size); // 立即伸缩窗口
-}
-
 menuEl.addEventListener("click", async (e) => {
   const item = e.target.closest(".menu-item");
   if (!item) return;
@@ -381,7 +380,6 @@ menuEl.addEventListener("click", async (e) => {
   saveSettings();
 
   if (k === "notify" && settings.notify) ensureNotifyPerm();
-  if (k === "mini") applyMini();
 });
 
 // ============================ 卡片右键菜单 ============================
@@ -459,6 +457,5 @@ window.addEventListener("pointerdown", unlockAudio);
 
 // ============================ 启动 ============================
 if (settings.notify) ensureNotifyPerm();
-applyMini();
 tick();
 setInterval(tick, 1000);

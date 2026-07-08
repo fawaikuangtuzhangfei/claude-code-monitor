@@ -272,12 +272,6 @@ html, body {
 .ctx-item.danger:hover { background: rgba(255, 107, 107, 0.12); }
 .ctx-div { height: 1px; margin: 3px 5px; background: var(--hair); }
 
-/* ============================== 迷你模式 ============================== */
-/* 折叠成一条：只留顶栏（含 WAIT/RUN/DONE 计数 + 呼吸信号灯），卡片全隐 */
-body.mini #cards,
-body.mini #empty { display: none !important; }
-body.mini #titlebar { border-bottom: 0; }
-
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }
 }

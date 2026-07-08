@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "claude-monitor"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "dirs 5.0.1",
  "libc",
