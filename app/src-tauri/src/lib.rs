@@ -120,7 +120,8 @@ fn focus_session(session_id: String) -> Result<(), String> {
     {
         let title = v.get("window_title").and_then(|x| x.as_str()).unwrap_or("");
         let tty = v.get("tty").and_then(|x| x.as_str()).unwrap_or("");
-        focus_macos(title, tty);
+        let cwd = v.get("cwd").and_then(|x| x.as_str()).unwrap_or("");
+        focus_macos(title, tty, cwd);
         return Ok(());
     }
 
@@ -156,10 +157,57 @@ fn focus_hwnd_windows(hwnd: i64) {
 }
 
 #[cfg(target_os = "macos")]
-fn focus_macos(title: &str, tty: &str) {
-    // ① 把 Ghostty 唤到最前；若该会话恰好在“独立窗口”里，还顺带按标题 AXRaise 提到最前。
-    //    （Ghostty 的分屏 split 在辅助功能树里不是独立可寻址元素，也没有 IPC，无法从外部
-    //     精确聚焦某一格——这一步只能保证把 Ghostty 应用本身带到前台。）
+fn focus_macos(title: &str, tty: &str, cwd: &str) {
+    // Ghostty 1.3+ 自带 AppleScript 字典，每个分屏 split 都是一个可寻址的 `terminal`，
+    // 且 `focus` 命令会「聚焦该 terminal 并把它所在窗口提到最前」——所以能精确定位到某一格。
+    // 难点：AppleScript 读不到 split 的 tty，只暴露 id/name/working directory。我们利用看板
+    // 手里已有的 tty，在点击这一刻往该 tty 写一个唯一标记当标题(OSC 2)，再让 AppleScript 去
+    // focus「标题带这个标记」的那个 terminal，事后再把标题还原。
+    if tty.starts_with("/dev/tty") {
+        // 这条链有先后依赖(打标记→等 AppleScript 读→还原)，且首次会弹 TCC 授权框把
+        // osascript 卡住，所以整段放进分离线程跑，命令立即返回、看板 UI 永不阻塞。
+        let tty = tty.to_string();
+        let restore = std::path::Path::new(cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        std::thread::spawn(move || {
+            let marker = focus_marker();
+            // ① 打标记：OSC 2 只改这一个 surface 的标题，不打印字符、不进 stdin、不扰乱正在跑的 TUI。
+            write_tty(&tty, &format!("\x1b]2;{marker}\x07"));
+
+            // ② activate + 精确 focus 带标记的那一格。用同步(.status)等它读完标记再往下走，
+            //    否则③的还原会抢在 AppleScript 读取之前把标记覆盖掉。none 匹配时 try 吞掉，
+            //    但 activate 已经先执行——至少把 Ghostty 带到前台。
+            let script = format!(
+                r#"tell application "Ghostty"
+  activate
+  try
+    focus (first terminal whose name contains "{marker}")
+  end try
+end tell"#
+            );
+            let _ = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .status();
+
+            // ③ 还原标题：否则这个临时标记会一直挂在 tab 上，直到 shell/Claude 下次重绘——而一个
+            //    正等你输入的会话短期内并不会重绘。还原成 cwd 的目录名，跟 shell 集成给的标题一致。
+            if !restore.is_empty() {
+                write_tty(&tty, &format!("\x1b]2;{restore}\x07"));
+            }
+
+            // ④ 兜底：再写一个 BEL(0x07)，Ghostty 会在这一格亮起铃铛提示、视觉闪一下——万一
+            //    AppleScript 被 TCC 拒了(没给自动化权限)、或 Ghostty 版本过老，这一步仍能帮你定位。
+            write_tty(&tty, "\x07");
+        });
+        return;
+    }
+
+    // 没抓到 tty(会话还没提交过任务)：退化成「按持久化标题把整个窗口 AXRaise 提前」，
+    // 粒度粗、选不到具体某一格，但聊胜于无。此路径依赖辅助功能权限。
     let mut script = String::from("tell application \"Ghostty\" to activate\n");
     if !title.is_empty() {
         script.push_str(&format!(
@@ -180,15 +228,27 @@ end try
         .arg("-e")
         .arg(&script)
         .spawn();
+}
 
-    // ② 向该会话的 tty 写一个 BEL(0x07)：Ghostty 会在对应 tab/分屏上亮起提示、视觉闪一下，
-    //    帮你一眼定位到具体是哪一格。BEL 不打印字符、不进程序 stdin，不会打乱正在跑的 TUI。
-    //    只接受 /dev/tty* 路径，防止误写到别的文件。
-    if tty.starts_with("/dev/tty") {
-        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(tty) {
-            use std::io::Write;
-            let _ = f.write_all(b"\x07");
-        }
+/// 生成一次点击专属的唯一标记（纳秒时间戳，字符集仅 [A-Za-z0-9_]，塞进 AppleScript/OSC 都安全）。
+#[cfg(target_os = "macos")]
+fn focus_marker() -> String {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("__CCMON_{n}")
+}
+
+/// 向 tty 写一小段控制序列。只认 /dev/tty* 路径，防止误写到别的文件。
+#[cfg(target_os = "macos")]
+fn write_tty(tty: &str, s: &str) {
+    if !tty.starts_with("/dev/tty") {
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(tty) {
+        use std::io::Write;
+        let _ = f.write_all(s.as_bytes());
     }
 }
 
