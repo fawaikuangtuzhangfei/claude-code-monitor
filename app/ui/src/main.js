@@ -46,7 +46,15 @@ function subOf(s) {
   switch (s.status) {
     case "running": return s.last_prompt || "运行中…";
     case "waiting": return s.message || s.last_prompt || "等待输入 / 授权";
-    case "done": return "本轮完成";
+    case "done": {
+      if (s.updated_at) {
+        const d = new Date(s.updated_at);
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        return `完成于 ${hh}:${mm}`;
+      }
+      return "本轮完成";
+    }
     default: return s.cwd ? s.cwd.replace(/\\/g, "/").split("/").slice(-2).join("/") : "空闲";
   }
 }
@@ -118,8 +126,8 @@ function fireAlert(el, s, kind) {
     const name = nameOf(s);
     try {
       notif.sendNotification({
-        title: kind === "waiting" ? `⏸ ${name} 需要你输入` : `✓ ${name} 本轮完成`,
-        body: subOf(s),
+        title: kind === "waiting" ? `⏸ ${name} 需要你输入` : `✓ ${name} ${subOf(s)}`,
+        body: kind === "waiting" ? (s.message || s.last_prompt || "等待输入 / 授权") : "",
       });
     } catch {}
   }

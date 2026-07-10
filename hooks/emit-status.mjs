@@ -50,6 +50,36 @@ function captureWindowMac(title) {
   }
 }
 
+// macOS：若本会话在 Ghostty 里，读它所在 tab 的名字（如 work1 / merge）当看板卡片标签——
+// 比 cwd 目录名更贴合你眼睛看到的分组。复用 captureWindowMac 刚写下的 CLAUDEMON:<sessionId>
+// 标题当定位标记，AppleScript 找到这个 split 后反查它属于哪个 tab、取 tab 名（零额外闪烁）。
+// 只在确认身处 Ghostty 时才跑，否则 `tell application "Ghostty"` 会误把 Ghostty 拉起来。
+function captureGhosttyTabMac(marker) {
+  const inGhostty = process.env.TERM === 'xterm-ghostty' || !!process.env.GHOSTTY_RESOURCES_DIR;
+  if (!inGhostty) return '';
+  // marker 只含 CLAUDEMON: + 已清洗的 sessionId（[A-Za-z0-9_-]），塞进 AppleScript 字符串安全
+  const script = `tell application "Ghostty"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in terminals of t
+        if name of s contains "${marker}" then return (name of t)
+      end repeat
+    end repeat
+  end repeat
+end tell`;
+  try {
+    // 2s 超时兜底：首次可能弹「控制 Ghostty」授权框，超时即放弃、退回项目名，不卡死 session-start
+    const out = execFileSync('osascript', ['-e', script], {
+      encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    // 空 = 没匹配到；含 CLAUDEMON = 该 tab 未固定标题、正映射我们自己写的标记，别用它
+    if (!out || out.includes('CLAUDEMON')) return '';
+    return out;
+  } catch {
+    return '';
+  }
+}
+
 // macOS：记录“承载本会话的进程”PID —— 从本 hook 进程向上找，跳过中间的 shell，
 // 取第一个非 shell 祖先（即 Claude Code 会话进程本身）。看板据此判断：这个进程若已
 // 不存在，说明终端标签/窗口被直接关掉（未触发 SessionEnd），对应卡片是僵尸，应剔除。
@@ -236,6 +266,7 @@ let winPid = prev.win_pid || null;
 let windowTitle = prev.window_title || '';
 let ownerPid = prev.owner_pid || null;
 let tty = prev.tty || '';
+let termTitle = prev.term_title || ''; // mac: Ghostty tab 名（如 work1）；Windows 侧由看板实时读窗口标题
 // session-start 必抓；prompt 时若还没抓到窗口/会话进程则补抓一次（darwin 靠 ownerPid 收口，
 // 别每个 prompt 都 fork ps）；win32 下若已有 hwnd 但缺 win_pid（升级前捕获的老会话），
 // 也补抓一次，让 HWND 复用校验尽快生效。
@@ -251,6 +282,8 @@ if (needCapture) {
     // 标题只用已清洗的 sessionId，避免把目录名里的 ESC/引号写进终端转义或 osascript
     windowTitle = windowTitle || `CLAUDEMON:${sessionId}`;
     captureWindowMac(windowTitle);
+    const tab = captureGhosttyTabMac(windowTitle); // 紧接着读 tab 名，复用刚写下的标题
+    if (tab) termTitle = tab;
     const p = captureOwnerPidMac();
     if (p) ownerPid = p;
     const t = captureTtyMac(ownerPid || process.pid);
@@ -275,6 +308,7 @@ const record = {
   window_title: windowTitle,
   owner_pid: ownerPid,
   tty,
+  term_title: termTitle,
 };
 
 // 落盘前再确认一次：写 running/waiting 期间，若文件已被并发的 Stop 写成 done/closed
