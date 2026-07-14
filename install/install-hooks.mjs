@@ -18,6 +18,9 @@ const CLAUDE_DIR = join(HOME, '.claude');
 const HOOKS_DIR = join(CLAUDE_DIR, 'monitor-hooks');
 const EMITTER_SRC = join(__dirname, '..', 'hooks', 'emit-status.mjs');
 const EMITTER_DST = join(HOOKS_DIR, 'emit-status.mjs');
+// emit-status.mjs 依赖同目录的 status-logic.mjs（纯决策核心），必须一并复制
+const LOGIC_SRC = join(__dirname, '..', 'hooks', 'status-logic.mjs');
+const LOGIC_DST = join(HOOKS_DIR, 'status-logic.mjs');
 const WINCAP_SRC = join(__dirname, '..', 'hooks', 'win-capture.ps1');
 const WINCAP_DST = join(HOOKS_DIR, 'win-capture.ps1');
 const SETTINGS = join(CLAUDE_DIR, 'settings.json');
@@ -58,6 +61,7 @@ function install() {
   // 1) 复制发射器 + Windows 窗口捕获脚本
   mkdirSync(HOOKS_DIR, { recursive: true });
   copyFileSync(EMITTER_SRC, EMITTER_DST);
+  copyFileSync(LOGIC_SRC, LOGIC_DST); // 决策核心，emit-status 运行时 import 它
   if (existsSync(WINCAP_SRC)) copyFileSync(WINCAP_SRC, WINCAP_DST);
   console.log('✓ 已复制发射器 ->', EMITTER_DST);
 

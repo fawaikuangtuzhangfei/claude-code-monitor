@@ -14,6 +14,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 先跑 hooks 状态机单测（纯 Node、秒级），任何状态转移回归第一时间暴露，不用等编译。
+  hooks-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Test hooks state machine
+        run: node --test hooks/
+
   build:
     strategy:
       fail-fast: false

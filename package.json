@@ -1,0 +1,8 @@
+{
+  "name": "claude-code-monitor",
+  "private": true,
+  "description": "hooks 状态机的测试入口；看板本体在 app/",
+  "scripts": {
+    "test": "node --test hooks/"
+  }
+}

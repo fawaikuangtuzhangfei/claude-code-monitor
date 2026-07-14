@@ -144,6 +144,8 @@ pnpm tauri build
 claude-code-monitor/
 ├─ hooks/
 │  ├─ emit-status.mjs        # 状态发射器（被各 hook 调用，纯 Node 无依赖）
+│  ├─ status-logic.mjs       # 状态机决策核心（纯函数，无 I/O；发射器 import 它）
+│  ├─ status-logic.test.mjs  # 状态转移单测（node --test / npm test）
 │  └─ win-capture.ps1        # Windows 终端窗口 HWND 捕获
 ├─ install/install-hooks.mjs # 一键装/卸 hooks（幂等，自动备份 settings.json）
 ├─ app/                      # Tauri 看板
