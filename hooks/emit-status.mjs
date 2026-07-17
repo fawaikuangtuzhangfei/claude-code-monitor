@@ -265,7 +265,12 @@ let winPid = prev.win_pid || null;
 let windowTitle = prev.window_title || '';
 let ownerPid = prev.owner_pid || null;
 let tty = prev.tty || '';
-let termTitle = prev.term_title || ''; // mac: Ghostty tab 名（如 work1）；Windows 侧由看板实时读窗口标题
+// 卡片标签来源，优先级：CC_TAG 环境变量 > mac Ghostty tab 名（兜底）。
+// CC_TAG：用户给会话手打的标签（export CC_TAG=xxx）。确定性、跨终端、不受 Claude Code 反复
+// 覆写终端标题影响，故优先级最高；纯 env 读取无 fork，每次 emit 都刷新，改了立即生效。
+let termTitle = prev.term_title || '';
+const ccTag = (process.env.CC_TAG || '').trim();
+if (ccTag) termTitle = ccTag;
 // session-start 必抓；prompt 时若还没抓到窗口/会话进程则补抓一次（darwin 靠 ownerPid 收口，
 // 别每个 prompt 都 fork ps）；win32 下若已有 hwnd 但缺 win_pid（升级前捕获的老会话），
 // 也补抓一次，让 HWND 复用校验尽快生效。
@@ -281,8 +286,13 @@ if (needCapture) {
     // 标题只用已清洗的 sessionId，避免把目录名里的 ESC/引号写进终端转义或 osascript
     windowTitle = windowTitle || `CLAUDEMON:${sessionId}`;
     captureWindowMac(windowTitle);
-    const tab = captureGhosttyTabMac(windowTitle); // 紧接着读 tab 名，复用刚写下的标题
-    if (tab) termTitle = tab;
+    // 仅在没设 CC_TAG 时兜底读 Ghostty tab 名。注意这是 best-effort：Claude Code 会把终端标题
+    // 反复改成「✳ Claude Code」，我们写下的定位标记常被冲掉，此路径不保证命中——想稳定拿到
+    // 标签就 export CC_TAG。
+    if (!ccTag) {
+      const tab = captureGhosttyTabMac(windowTitle); // 紧接着读 tab 名，复用刚写下的标题
+      if (tab) termTitle = tab;
+    }
     const p = captureOwnerPidMac();
     if (p) ownerPid = p;
     const t = captureTtyMac(ownerPid || process.pid);
