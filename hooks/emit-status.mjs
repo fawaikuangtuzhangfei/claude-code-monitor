@@ -9,7 +9,7 @@
 //   { session_id, cwd, transcript_path, hook_event_name, ... }
 // 这个脚本纯 Node、无第三方依赖，Windows / macOS 通用。
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, renameSync, openSync, writeSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, renameSync, openSync, writeSync, closeSync, statSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -134,6 +134,58 @@ function gitBranch(dir) {
   }
 }
 
+// 只读文件尾部 maxBytes 字节（从中间截断时丢掉开头的半行）。用于扫 transcript：
+//   - 降延迟：大 transcript 不必整读（28MB 全读 ~70ms，只读尾部 ~2ms）
+//   - 收窄误判窗口：后台 agent 几乎都是近期启动的，只看尾部就够；久远的启动痕迹自然滑出，
+//     避免某个「启动了却永远没回报完成」的僵尸 agent 把会话永久钉在 RUN。
+function readTail(path, maxBytes) {
+  const size = statSync(path).size;
+  const start = size > maxBytes ? size - maxBytes : 0;
+  const len = size - start;
+  if (len <= 0) return '';
+  const buf = Buffer.allocUnsafe(len);
+  const fd = openSync(path, 'r');
+  try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+  let text = buf.toString('utf8');
+  if (start > 0) { const nl = text.indexOf('\n'); if (nl >= 0) text = text.slice(nl + 1); } // 丢半行
+  return text;
+}
+
+const TAIL_BYTES = 1024 * 1024; // 只扫 transcript 末尾 1MB
+// 后台 agent 的 id 是长十六进制串（如 aad772afa9db2dd3b）。锁死这个格式，避免把粘贴进
+// 会话正文里的类似字样、或旧版本的短 task-id（如 bc4dj6zrq）误当成真 agent。
+const ID = '[0-9a-f]{16,}';
+const LAUNCH_RE = new RegExp(`agentId:\\s*(${ID})`);
+const TASKID_RE = new RegExp(`<task-id>(${ID})</task-id>`, 'g');
+
+// Stop 时判断：本会话是否还有「已启动、但尚未回报完成」的后台 agent（Agent 工具后台跑）。
+// 有的话，这次 Stop 其实不是真 done——主会话在等后台结果，稍后会被自动唤醒续跑。
+//
+// 依据 transcript 里的两类痕迹配对（按 agentId）：
+//   启动：Agent 工具的 tool_result 文本含 "Async agent launched successfully" + "agentId: <id>"
+//   完成：注入的 <task-notification> 里含 <task-id><id></task-id>（agent 每次停下都会回报一条）
+// 只要某个已启动的 agentId 还没出现过任何 task-notification，就算它仍在后台跑。
+// 纯字符串扫描（不整行 JSON.parse），只读尾部；读盘/解析出错一律当「无后台」以退回原行为。
+function hasPendingBackgroundAgent(path) {
+  if (!path || !existsSync(path)) return false;
+  let text;
+  try { text = readTail(path, TAIL_BYTES); } catch { return false; }
+  const launched = new Set(); // 后台启动过的 agentId
+  const reported = new Set(); // 已回报过 task-notification 的 agentId（= 至少停过一次）
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    if (line.includes('Async agent launched successfully')) {
+      const m = line.match(LAUNCH_RE);
+      if (m) launched.add(m[1]);
+    }
+    if (line.includes('<task-id>')) {
+      for (const m of line.matchAll(TASKID_RE)) reported.add(m[1]);
+    }
+  }
+  for (const id of launched) if (!reported.has(id)) return true;
+  return false;
+}
+
 // 读取 stdin（hook 输入）。异步累积，Windows 管道下也可靠。
 function readStdin() {
   return new Promise((resolve) => {
@@ -182,8 +234,11 @@ if (existsSync(outFile)) {
 
 const now = Date.now();
 
+// Stop 时才扫 transcript 判断有无未完成的后台 agent（其余事件不需要，避免每步都读盘）。
+const bgPending = EVENT === 'stop' ? hasPendingBackgroundAgent(transcriptPath) : false;
+
 // 纯决策：状态转移 / 跳过条件 / since 打点 / 提示语，全在 status-logic.mjs 里，便于单测。
-const decision = decide({ event: EVENT, input, prev, now });
+const decision = decide({ event: EVENT, input, prev, now, bgPending });
 if (decision.action === 'delete') {
   try { rmSync(outFile, { force: true }); } catch {}
   process.exit(0);

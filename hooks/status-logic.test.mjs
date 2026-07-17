@@ -50,6 +50,22 @@ test('done 之后来的保活事件不会把 done 冲回 running', () => {
   assert.equal(d('subagent-stop', { status: 'done' }).action, 'skip');
 });
 
+// ---- Stop 时仍有后台 agent 未完成：不算真 done ----
+test('stop + 有未完成后台 agent -> running（不是 done）', () => {
+  const r = decide({ event: 'stop', prev: { status: 'running', running_since: 42 }, input: {}, now: NOW, bgPending: true });
+  assert.equal(r.status, 'running', '在等后台结果，应记 running');
+  assert.equal(r.runningSince, 42, '连续 running，耗时起点不刷新');
+});
+
+test('stop + 后台 agent 都已完成 -> done（照常）', () => {
+  assert.equal(decide({ event: 'stop', prev: { status: 'running' }, input: {}, now: NOW, bgPending: false }).status, 'done');
+});
+
+test('bgPending 只影响 stop：其它事件不受它左右', () => {
+  assert.equal(decide({ event: 'prompt', prev: {}, input: {}, now: NOW, bgPending: true }).status, 'running');
+  assert.equal(decide({ event: 'permission', prev: { status: 'running' }, input: {}, now: NOW, bgPending: true }).status, 'waiting');
+});
+
 // ---- Notification 二义 ----
 test('notification 在 running 时 = 真 WAIT', () => {
   const r = d('notification', { status: 'running' }, { message: '需要授权' });

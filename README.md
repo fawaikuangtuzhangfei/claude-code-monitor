@@ -40,7 +40,7 @@ Claude Code 会话 ──(hook)──> emit-status.mjs ──原子写──> ~/
   | `PreToolUse` / `PostToolUse` / `SubagentStop` | 保活：仅当在等待中才清成 🟢 running，否则不改状态 |
   | `PermissionRequest` | 🟡 waiting（等你授权） |
   | `Notification` | 运行中才算 🟡 waiting（真的需要输入）；一轮结束后的空闲提醒会被忽略，保持 🔵 done |
-  | `Stop` | 🔵 done（一轮结束） |
+  | `Stop` | 🔵 done（一轮结束）；但若此刻仍有后台 agent 在跑（`Agent` 工具后台执行、尚未回报完成），主会话其实在等后台结果、稍后会被自动唤醒续跑，此时保持 🟢 running 而非误判 done |
   | `SessionEnd` | 删除文件，看板上自然消失 |
 
 - 状态判定对并发写做了兜底：保活事件不与 `Stop` 抢写（避免 done 被冲回 running），空闲提醒不会把 done 误翻成 waiting。

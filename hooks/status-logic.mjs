@@ -38,12 +38,17 @@ function clip(s) {
 //                       lastPrompt, message }
 //
 // 入参：
-//   event  — 归一化后的事件名（小写）
-//   input  — hook 从 stdin 传入的对象（可能缺字段）
-//   prev   — 上一份状态记录（无则传 {}）
-//   now    — 当前时间戳（毫秒），由调用方注入以便测试
-export function decide({ event, input = {}, prev = {}, now }) {
-  const status = STATUS_BY_EVENT[event] ?? 'idle';
+//   event     — 归一化后的事件名（小写）
+//   input     — hook 从 stdin 传入的对象（可能缺字段）
+//   prev      — 上一份状态记录（无则传 {}）
+//   now       — 当前时间戳（毫秒），由调用方注入以便测试
+//   bgPending — Stop 时是否仍有已启动、未回报完成的后台 agent（由 I/O 层扫描 transcript 得出）
+export function decide({ event, input = {}, prev = {}, now, bgPending = false }) {
+  let status = STATUS_BY_EVENT[event] ?? 'idle';
+
+  // Stop 但还有后台 agent 在跑：主会话并非真 done——它在等后台结果，稍后会被自动唤醒续跑。
+  // 记为 running（绿：机器在干活），而不是 done（蓝：可以去看了）。等后台清空后的 Stop 才算真 done。
+  if (event === 'stop' && bgPending) status = 'running';
 
   // session 结束：删文件，看板自然消失
   if (status === 'closed') return { action: 'delete' };
