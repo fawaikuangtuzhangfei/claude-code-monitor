@@ -1,5 +1,7 @@
 # ── Dependencies ──
 node_modules/
+# 项目用 pnpm（pnpm-lock.yaml），npm 误生成的 lockfile 不入库
+package-lock.json
 
 # ── Rust / Tauri build output (体积巨大，切勿提交) ──
 target/
