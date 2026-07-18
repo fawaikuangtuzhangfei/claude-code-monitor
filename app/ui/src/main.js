@@ -12,8 +12,12 @@ const cardsEl = document.getElementById("cards");
 const emptyEl = document.getElementById("empty");
 const readoutEl = document.getElementById("readout");
 const sigEl = document.getElementById("sig");
+const usageEl = document.getElementById("usage");
 
 const rows = new Map(); // session_id -> HTMLElement
+// 已通知过的状态：session_id -> status。放模块级（不挂在行元素上）——这样某会话哪怕
+// 在列表里反复进出、行被反复重建，也不会把同一个「完成/等你」重复通知。
+const notifiedStatus = new Map();
 
 function invoke(cmd, args) {
   if (window.__TAURI__?.core?.invoke) return window.__TAURI__.core.invoke(cmd, args);
@@ -138,11 +142,17 @@ function fireAlert(el, s, kind) {
   }
 }
 
-// 每行记录“上次已通知过的状态”，仅在真正跨状态时触发（并在未 primed 时静默打底）
+// 按 session_id 记录“上次已通知过的状态”，仅在真正跨状态时触发（未 primed 时静默打底）。
+// 用 session_id 而非行元素做键：会话反复进出列表/行被重建也不会重复通知同一状态。
 function maybeNotify(el, s) {
   const st = s.status;
-  const prev = el._notifiedStatus;
-  el._notifiedStatus = st;
+  const id = s.session_id;
+  const prev = notifiedStatus.get(id);
+  notifiedStatus.set(id, st);
+  // 首次见到该会话：静默打底，绝不通知。否则「开板/重启前就已完成」或「晚一帧才进列表」的
+  // 会话会被误当成刚刚完成而误报——这才是刷屏的根因（重启一次攒一条）。只有亲眼见证它从别的
+  // 状态切进来才算数。
+  if (prev === undefined) return;
   if (!primed || st === prev) return;
   if (!IS_DOCK) return; // 通知/提示音只由固定看板发，浮窗不重复
   if (st === "waiting") fireAlert(el, s, "waiting");
@@ -258,7 +268,8 @@ function autosize(n) {
   for (let i = 0; i < kids.length; i++) cards += kids[i].offsetHeight;
   if (kids.length > 1) cards += (kids.length - 1) * 7; // gap（与 styles.css #cards 的 gap 一致）
   if (n === 0) cards = 56; // 空态占位
-  const needed = Math.ceil(titlebarEl.offsetHeight + cards + 2); // +2 边框
+  const foot = usageEl && !usageEl.classList.contains("hidden") ? usageEl.offsetHeight : 0;
+  const needed = Math.ceil(titlebarEl.offsetHeight + cards + foot + 2); // +2 边框
 
   const maxH = Math.max(160, (window.screen.availHeight || 900) - 80);
   const h = Math.min(needed, maxH);
@@ -311,6 +322,86 @@ async function tick() {
   } catch {
     render([]); // 非 Tauri 环境（如纯浏览器打开）时空渲染
   }
+  if (usageState) renderUsage(); // 每秒用缓存重算倒计时（不取数），与卡片计时同频
+}
+
+// —— 用量条 ——
+// 首选：Claude Code 递给 statusline 的真实「占限额百分比」（5h / 7d），需装 statusline 桥接。
+// 退回：本地 transcript 累加的 token 总量（近 5h / 24h），任何人都能看，只是不含百分比。
+function fmtTokens(n) {
+  if (!n) return "0";
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+}
+// 百分比配色：<50 稳、50~80 注意、>=80 告警
+function pctClass(p) {
+  return p >= 80 ? "u-danger" : p >= 50 ? "u-warn" : "u-ok";
+}
+// resets_at（Unix 秒）-> “重置于 2h13m / 3d4h”
+function fmtReset(sec) {
+  if (!sec) return "";
+  const s = Math.max(0, sec * 1000 - Date.now()) / 1000;
+  if (s < 3600) return `${Math.ceil(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  return `${Math.floor(s / 86400)}d${Math.floor((s % 86400) / 3600)}h`;
+}
+
+// 数据每 30s 取一次缓存在这里；倒计时每秒用缓存重算，不重复取数/扫盘。
+let usageState = null; // { mode:"limits", rl } | { mode:"tokens", u } | null
+
+// 一排限额仪表：标签 · 刻度条(填充=占比) · 读数 · 重置倒计时
+function gaugeRow(label, w) {
+  if (!w || typeof w.used_percentage !== "number") return "";
+  const p = Math.round(w.used_percentage);
+  const cls = pctClass(p);
+  const width = Math.max(2, Math.min(100, p)); // 至少留 2% 让填充可见
+  const reset = fmtReset(w.resets_at);          // 每次调用都重算 → 每秒走字
+  return `<div class="u-gauge">` +
+    `<span class="u-glabel">${label}</span>` +
+    `<span class="u-track"><span class="u-fill ${cls}" style="width:${width}%"></span></span>` +
+    `<span class="u-pct ${cls}">${p}<i>%</i></span>` +
+    (reset
+      ? `<span class="u-reset" title="${label} 窗口重置倒计时">⟳${reset}</span>`
+      : `<span class="u-reset u-reset-none">—</span>`) +
+    `</div>`;
+}
+
+function renderUsage() {
+  if (!usageState) { usageEl.classList.add("hidden"); return; }
+  if (usageState.mode === "limits") {
+    const rl = usageState.rl, lim = rl.rate_limits;
+    // 只显示 5H / 7D 占限额百分比。花费($)刻意不显示：usage-limits.json 全局一份，
+    // 谁的 statusline 最后刷新就覆盖成谁的 total_cost_usd，多开时会来回跳，参考意义低。
+    usageEl.innerHTML = [gaugeRow("5H", lim.five_hour), gaugeRow("7D", lim.seven_day)].filter(Boolean).join("");
+    usageEl.classList.remove("hidden");
+  } else {
+    const u = usageState.u;
+    const tok = (label, n) =>
+      `<div class="u-gauge u-gauge-tok"><span class="u-glabel">${label}</span>` +
+      `<span class="u-pct">${fmtTokens(n)}</span><span class="u-tok-unit">TOK</span></div>`;
+    usageEl.innerHTML = tok("5H", u.last5h) + tok("24H", u.last24h);
+    usageEl.classList.remove("hidden");
+  }
+}
+
+// 30s 取一次数据：优先真实限额%，缺失退回 token 累加
+async function tickUsage() {
+  try {
+    let rl = null;
+    try { rl = await invoke("get_rate_limits"); } catch {}
+    const lim = rl && rl.rate_limits;
+    if (lim && (lim.five_hour || lim.seven_day)) {
+      usageState = { mode: "limits", rl };
+    } else {
+      const u = await invoke("get_usage");
+      usageState = u && (u.last5h || u.last24h) ? { mode: "tokens", u } : null;
+    }
+  } catch {
+    usageState = null;
+  }
+  renderUsage();
+  autosize(rows.size); // 用量条显隐会改变总高，重算一次
 }
 
 // ============================ 标题栏按钮 ============================
@@ -467,3 +558,5 @@ window.addEventListener("pointerdown", unlockAudio);
 if (settings.notify) ensureNotifyPerm();
 tick();
 setInterval(tick, 1000);
+tickUsage();
+setInterval(tickUsage, 30000); // 用量变化慢，30s 拉一次即可，避免每秒全盘扫日志

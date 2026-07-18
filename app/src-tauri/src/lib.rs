@@ -29,6 +29,12 @@ fn list_sessions() -> Vec<Value> {
             continue;
         };
 
+        // 跳过目录里的非会话 json（如 statusline 桥接写的 usage-limits.json）。
+        // 会话文件必有 status 字段；缺了就不是会话，别渲染成一张 "unknown" 空卡。
+        if v.get("status").and_then(|x| x.as_str()).is_none() {
+            continue;
+        }
+
         // Windows：实时读取该会话终端窗口标题；窗口已不存在 = 终端被直接关掉
         // （未触发 SessionEnd）的僵尸会话，剔除，避免残留一张假 RUN/DONE/WAIT。
         #[cfg(windows)]
@@ -80,6 +86,172 @@ fn list_sessions() -> Vec<Value> {
         out.push(v);
     }
     out
+}
+
+/// 当前时间（Unix 毫秒）。
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 把 ISO8601 UTC 时间串（如 2026-07-18T10:14:00.000Z）转成 Unix 毫秒。
+/// transcript 里的 timestamp 都带 Z（UTC），所以按 UTC 解析即可；小数秒/时区后缀忽略，
+/// 只取到秒——用于分桶对比阈值，精度足够。不引 chrono，用 days-from-civil 算历法。
+fn iso8601_to_ms(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 19 {
+        return None;
+    }
+    // 校验固定分隔符（'-' '-' 'T' ':' ':'），把「长度够但不是时间串」的行挡在外面，避免误解析
+    if b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let num = |a: usize, z: usize| -> Option<i64> { s.get(a..z)?.parse().ok() };
+    let (y, mo, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    let (h, mi, se) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // Howard Hinnant days_from_civil
+    let a = if mo <= 2 { 1 } else { 0 };
+    let y2 = y - a;
+    let era = (if y2 >= 0 { y2 } else { y2 - 399 }) / 400;
+    let yoe = y2 - era * 400; // [0, 399]
+    let m_adj = mo + 12 * a - 3; // [0, 11]
+    let doy = (153 * m_adj + 2) / 5 + d - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    let secs = days * 86400 + h * 3600 + mi * 60 + se;
+    Some(secs * 1000)
+}
+
+/// 累加 Claude Code 本地 transcript 里的 token 用量，按滚动窗口（近 5 小时 / 近 24 小时）汇总。
+///
+/// 数据源：~/.claude/projects/<项目>/*.jsonl —— 每行一条事件，assistant 行带 message.usage
+/// （input/output/cache_creation/cache_read 四类 token）。这是 Claude Code 自己落的本地日志，
+/// **无需登录、不消耗 API、不调任何接口**，只读本机文件。
+///
+/// 关键处理：
+///   - 按 message.id 去重：同一条 assistant 消息会因工具续写在多行重复出现，不去重会翻倍。
+///   - mtime 门控：24 小时内没改动过的文件整体跳过，避免每次都全盘扫历史日志。
+///   - 滚动窗口而非“本地今日”：规避本地时区/夏令时的 midnight 计算，也让深夜看数更直觉。
+///   - 全量重扫（不缓存字节偏移）：文件被 /clear 换 inode 或截断都无所谓，天然无偏移量 bug。
+/// Tauri 命令入口：把重活（扫目录 + 读大文件 + 解析）丢到阻塞线程池，绝不占主线程。
+/// 同步命令在 Tauri v2 会跑在主线程上，扫到 28MB transcript 时足以卡住 UI；故这里用
+/// async + spawn_blocking 把它挪走。
+#[tauri::command]
+async fn get_usage() -> Value {
+    tauri::async_runtime::spawn_blocking(scan_usage)
+        .await
+        .unwrap_or_else(|_| serde_json::json!({ "last5h": 0, "last24h": 0, "updated_at": now_ms() }))
+}
+
+fn scan_usage() -> Value {
+    use std::collections::HashSet;
+    let now = now_ms();
+    let t5 = now - 5 * 3600 * 1000;
+    let t24 = now - 24 * 3600 * 1000;
+    let mut u5: u64 = 0;
+    let mut u24: u64 = 0;
+
+    let result = |five: u64, day: u64| -> Value {
+        serde_json::json!({ "last5h": five, "last24h": day, "updated_at": now })
+    };
+
+    let Some(home) = dirs::home_dir() else {
+        return result(0, 0);
+    };
+    let root = home.join(".claude").join("projects");
+    let Ok(projects) = fs::read_dir(&root) else {
+        return result(0, 0);
+    };
+
+    let mut seen: HashSet<String> = HashSet::new(); // message.id 去重（滚动窗口内数量有限）
+    for proj in projects.flatten() {
+        let Ok(files) = fs::read_dir(proj.path()) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            // mtime 门控：24h 内没动过的文件不可能有窗口内数据，整块跳过
+            if let Ok(meta) = f.metadata() {
+                if let Ok(m) = meta.modified() {
+                    let mms = m
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
+                    if mms < t24 {
+                        continue;
+                    }
+                }
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for line in text.lines() {
+                // 快路径：不含 usage / 不是 assistant 的行（工具/元数据，约占多数）直接跳过，免 JSON 解析
+                if !line.contains("\"usage\"") || !line.contains("assistant") {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
+                if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
+                    continue;
+                }
+                let ts = v
+                    .get("timestamp")
+                    .and_then(|x| x.as_str())
+                    .and_then(iso8601_to_ms);
+                let Some(ts) = ts else { continue };
+                if ts < t24 {
+                    continue;
+                }
+                let Some(msg) = v.get("message") else { continue };
+                // 去重：按 message.id，避免续写多行重复计数
+                if let Some(id) = msg.get("id").and_then(|x| x.as_str()) {
+                    if !seen.insert(id.to_string()) {
+                        continue;
+                    }
+                }
+                let Some(usage) = msg.get("usage") else { continue };
+                let tok = |k: &str| usage.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+                let total = tok("input_tokens")
+                    + tok("output_tokens")
+                    + tok("cache_creation_input_tokens")
+                    + tok("cache_read_input_tokens");
+                u24 += total;
+                if ts >= t5 {
+                    u5 += total;
+                }
+            }
+        }
+    }
+    result(u5, u24)
+}
+
+/// 读取 statusline 桥接抓到的限额数据（~/.claude/monitor/usage-limits.json）。
+/// 里面是 Claude Code 递给 statusline 的 rate_limits / context_window / cost（见 statusline-bridge.mjs）。
+/// 这是**唯一**能拿到「占限额百分比」的本地来源：hook 收不到、也没有别的缓存文件。
+/// 文件不存在（没装桥接）或读失败时返回空对象，前端据此退回 token 累加显示。
+#[tauri::command]
+fn get_rate_limits() -> Value {
+    let Some(home) = dirs::home_dir() else {
+        return serde_json::json!({});
+    };
+    let path = home
+        .join(".claude")
+        .join("monitor")
+        .join("usage-limits.json");
+    match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<Value>(&text).unwrap_or_else(|_| serde_json::json!({})),
+        Err(_) => serde_json::json!({}),
+    }
 }
 
 /// 进程是否还存活（用于剔除终端已被关闭的僵尸会话）。
@@ -644,6 +816,8 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             list_sessions,
+            get_usage,
+            get_rate_limits,
             focus_session,
             remove_session,
             open_dir,

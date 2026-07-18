@@ -1,3 +1,6 @@
+/* Hallmark · scope: app-ui (HUD) · 跳过 macrostructure/nav/footer/hero
+ * pre-emit critique: P5 H4 E5 S4 R5 V4 · 纪律: 命名缓动 · 锁定 token · focus-visible a11y
+ */
 /* ============================================================
    Claude 看板 — 终端仪表盘 / HUD
    等宽字体 · 近黑玻璃 · LED 辉光 · 扫描线 · 取景器角标
@@ -17,6 +20,21 @@
   --run: #46d17e;            /* 跑着 — 活体绿 */
   --done: #58a6ff;           /* 完成 — 冷蓝 */
   --idle: #4a5262;           /* 空闲 — 灰 */
+  --danger: #ff5a5a;         /* 越限告警 — 红 */
+
+  /* 表面色阶：收拢散落的 rgba(白)，成一套可复用刻度 */
+  --surf-1: rgba(255, 255, 255, 0.022); /* 卡片底 */
+  --surf-2: rgba(255, 255, 255, 0.05);  /* 芯片 / 轨槽 */
+  --surf-3: rgba(255, 255, 255, 0.08);  /* 悬浮高亮 */
+  --hair-2: rgba(255, 255, 255, 0.12);  /* 浮层描边 */
+
+  /* 动效：命名缓动 + 时长，杜绝浏览器默认 ease（Hallmark 硬规） */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-1: 0.15s;            /* 微交互 */
+  --dur-2: 0.28s;            /* 入场 */
+
+  --focus: color-mix(in srgb, var(--run) 72%, transparent); /* 焦点环 */
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -47,6 +65,17 @@ html, body {
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+/* —— CRT 氛围层：静态扫描线 + 边角暗角。位于背景之上、内容之下（z:2），
+   纯静态、pointer-events:none —— 只加质感，绝不触发重绘/闪屏 —— */
+#app::before {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  border-radius: 12px;
+  background:
+    repeating-linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 3px),
+    radial-gradient(145% 105% at 50% -12%, transparent 52%, rgba(0, 0, 0, 0.42));
+}
+
 /* —— 取景器角标 —— */
 .corner {
   position: absolute; width: 9px; height: 9px; z-index: 6; pointer-events: none;
@@ -71,7 +100,7 @@ html, body {
 .sig {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--idle); box-shadow: 0 0 6px var(--idle);
-  transition: background 0.4s, box-shadow 0.4s;
+  transition: background 0.4s var(--ease-out), box-shadow 0.4s var(--ease-out);
 }
 .sig.run  { background: var(--run);  box-shadow: 0 0 8px var(--run); }
 .sig.wait { background: var(--wait); box-shadow: 0 0 9px var(--wait); animation: sigpulse 2.2s ease-in-out infinite; }
@@ -80,11 +109,13 @@ html, body {
 .brand-name {
   font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
   color: var(--ink); text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(205, 214, 226, 0.16);
 }
 .dot-sep { color: var(--run); margin: 0 1px; }
 
 .readout {
-  flex: 1; display: flex; gap: 10px; align-items: center;
+  flex: 1 1 0; min-width: 0; overflow: hidden;   /* 挤不下就自己收，绝不顶掉右侧按钮 */
+  display: flex; gap: 10px; align-items: center;
   font-size: 10px; letter-spacing: 0.5px; color: var(--ink-faint);
   text-transform: uppercase;
 }
@@ -94,15 +125,21 @@ html, body {
 .readout .stat.on-run b  { color: var(--run); }
 .readout .stat.zero { opacity: 0.4; }
 
-.ctl { display: flex; gap: 3px; }
+.ctl { display: flex; gap: 3px; flex-shrink: 0; }  /* 按钮组固定，永不被压缩/遮挡 */
 .tb-btn {
   font-family: var(--font-mono);
   width: 22px; height: 20px; border: 1px solid transparent; border-radius: 5px;
   background: transparent; color: var(--ink-dim); font-size: 10px; cursor: pointer;
-  display: grid; place-items: center; line-height: 1; transition: all 0.15s;
+  display: grid; place-items: center; line-height: 1; transition: all var(--dur-1) var(--ease-out);
 }
-.tb-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--ink); border-color: var(--hair); }
+.tb-btn:hover { background: var(--surf-3); color: var(--ink); border-color: var(--hair); }
 .tb-btn.active { color: var(--run); border-color: rgba(70, 209, 126, 0.4); background: rgba(70, 209, 126, 0.08); }
+/* 键盘可达：即时显现的焦点环（Hallmark 硬底线，绝不动画化） */
+.tb-btn:focus-visible,
+.menu-item:focus-visible,
+.ctx-item:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 1px;
+}
 
 /* ============================== 卡片区 ============================== */
 #cards {
@@ -120,23 +157,30 @@ html, body {
   flex-shrink: 0; /* 永不被 flex 压扁：装不下就让 #cards 滚动，量到的才是真实行高 */
   display: flex; align-items: center; gap: 11px;
   padding: 11px 13px 11px 13px;
-  background: rgba(255, 255, 255, 0.022);
+  /* 从左侧强调色淡淡染开，右侧回到中性玻璃——让状态色顺着 accent 边条溢进卡片 */
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent), var(--surf-1) 42%);
   border: 1px solid var(--hair);
   border-left: 2px solid var(--accent);
   border-radius: 7px;
-  transition: background 0.18s, border-color 0.18s, transform 0.12s;
-  animation: rowin 0.28s ease both;
+  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out), transform 0.12s var(--ease-out);
+  animation: rowin var(--dur-2) var(--ease-out) both;
 }
 @keyframes rowin {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* LED 状态灯 */
+/* LED 状态灯 —— ::after 加一点高光，做出玻璃球质感 */
 .row .led {
   width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
   background: var(--accent); box-shadow: 0 0 7px var(--accent);
   position: relative;
+}
+.row .led::after {
+  content: ""; position: absolute; top: 1.5px; left: 1.5px;
+  width: 3px; height: 3px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
 }
 
 .row .main { flex: 1; min-width: 0; }
@@ -173,7 +217,10 @@ html, body {
 
 /* —— 状态配色 —— */
 .row.running { --accent: var(--run); }
-.row.waiting { --accent: var(--wait); background: rgba(255, 178, 36, 0.06); border-color: rgba(255, 178, 36, 0.22); }
+.row.waiting {
+  --accent: var(--wait); border-color: rgba(255, 178, 36, 0.22);
+  background: linear-gradient(90deg, rgba(255, 178, 36, 0.14), rgba(255, 178, 36, 0.05) 55%);
+}
 .row.done    { --accent: var(--done); }
 .row.idle    { --accent: var(--idle); }
 .row.idle .led { box-shadow: none; }
@@ -210,6 +257,64 @@ html, body {
 @keyframes blink { 50% { opacity: 0; } }
 .hidden { display: none !important; }
 
+/* —— 用量条：底部 HUD 仪表组 —— 限额%走「标签·刻度条·读数·重置」四列 —— */
+.usage {
+  flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 11px 13px 12px;
+  border-top: 1px solid var(--hair-2);
+  background: linear-gradient(180deg, var(--surf-1), transparent 70%);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 一条限额 = 一排仪表 */
+.u-gauge {
+  display: grid;
+  grid-template-columns: 30px 1fr 48px auto;
+  align-items: center; gap: 10px;
+}
+/* 5H / 7D 标签：芯片化，够大够亮 —— 之前 9px 暗灰看不清就是这里 */
+.u-glabel {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.5px;
+  color: var(--ink); text-align: center;
+}
+
+/* 刻度条：底槽 + 填充；填充按阈值配色并自带辉光（静态，不触发重绘） */
+.u-track {
+  position: relative; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--surf-2);
+  border: 1px solid var(--hair-2);
+  /* 内部等距刻度纹，强化仪表感 */
+  background-image:
+    linear-gradient(var(--surf-2), var(--surf-2)),
+    repeating-linear-gradient(90deg, transparent 0 11px, rgba(255, 255, 255, 0.06) 11px 12px);
+}
+.u-fill {
+  display: block; height: 100%; border-radius: 4px;
+  transition: width 0.6s var(--ease-out);
+}
+.u-fill.u-ok     { background: linear-gradient(90deg, #2f9d5c, var(--run));  box-shadow: 0 0 8px rgba(70, 209, 126, 0.55); }
+.u-fill.u-warn   { background: linear-gradient(90deg, #c2841a, var(--wait)); box-shadow: 0 0 8px rgba(255, 178, 36, 0.55); }
+.u-fill.u-danger { background: linear-gradient(90deg, #d13b3b, var(--danger)); box-shadow: 0 0 11px rgba(255, 90, 90, 0.7); }
+
+.u-pct { font-size: 15px; font-weight: 800; text-align: right; letter-spacing: 0.3px; }
+.u-pct i { font-style: normal; font-size: 9px; font-weight: 700; opacity: 0.75; margin-left: 1px; }
+.u-pct.u-ok     { color: var(--run); }
+.u-pct.u-warn   { color: var(--wait); }
+.u-pct.u-danger { color: var(--danger); text-shadow: 0 0 6px rgba(255, 90, 90, 0.5); }
+
+.u-reset {
+  font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap;
+  padding: 2px 6px; border-radius: 5px;
+  background: var(--surf-3); border: 1px solid var(--hair-2);
+}
+.u-reset-none { color: var(--ink-faint); background: transparent; border-color: transparent; }
+
+/* token 退回模式：无百分比，只显示标签 + 数值 */
+.u-gauge-tok { grid-template-columns: 30px auto auto; justify-content: start; gap: 8px; }
+.u-gauge-tok .u-pct { color: var(--ink); min-width: 0; font-size: 14px; }
+.u-tok-unit { font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--ink-dim); }
+
 /* —— 状态变化闪烁（通知视觉）：叠一层描边脉冲，不改布局 —— */
 .row.flash-wait { animation: flashwait 1s ease-out 3; }
 .row.flash-done { animation: flashdone 0.8s ease-out 2; }
@@ -227,9 +332,9 @@ html, body {
   position: absolute; z-index: 30; top: 40px; right: 10px;
   min-width: 168px; padding: 5px;
   background: rgba(16, 19, 25, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
+  border: 1px solid var(--hair-2); border-radius: 9px;
   box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.7);
-  animation: menuin 0.14s ease both;
+  animation: menuin 0.14s var(--ease-out) both;
 }
 @keyframes menuin { from { opacity: 0; transform: translateY(-4px); } }
 .menu-item {
@@ -243,12 +348,12 @@ html, body {
 .mi-label { flex: 1; }
 .mi-sw {
   width: 26px; height: 15px; border-radius: 8px; flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.12); position: relative; transition: background 0.16s;
+  background: var(--hair-2); position: relative; transition: background 0.16s var(--ease-out);
 }
 .mi-sw::after {
   content: ""; position: absolute; top: 2px; left: 2px;
   width: 11px; height: 11px; border-radius: 50%;
-  background: #cdd6e2; transition: transform 0.16s;
+  background: var(--ink); transition: transform 0.16s var(--ease-out);
 }
 .menu-item.on .mi-sw { background: var(--run); }
 .menu-item.on .mi-sw::after { transform: translateX(11px); }
@@ -258,9 +363,9 @@ html, body {
 .ctx {
   position: absolute; z-index: 40; min-width: 132px; padding: 4px;
   background: rgba(16, 19, 25, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px;
+  border: 1px solid var(--hair-2); border-radius: 8px;
   box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.7);
-  animation: menuin 0.1s ease both;
+  animation: menuin 0.1s var(--ease-out) both;
 }
 .ctx-item {
   width: 100%; padding: 6px 9px; border: 0; border-radius: 5px;
