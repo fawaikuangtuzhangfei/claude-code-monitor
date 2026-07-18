@@ -71,7 +71,7 @@ function sideOf(s) {
 }
 
 // ============================ 设置（本地持久化） ============================
-const DEFAULTS = { notify: true, sound: true, autofocus: false };
+const DEFAULTS = { notify: true, sound: true, autofocus: false, light: false };
 let settings = loadSettings();
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("cm.settings") || "{}") }; }
@@ -80,6 +80,15 @@ function loadSettings() {
 function saveSettings() {
   try { localStorage.setItem("cm.settings", JSON.stringify(settings)); } catch {}
 }
+
+// 换肤：亮/暗只切 <html data-theme>，所有颜色走 CSS token 自动重算（暗色为默认，不设属性）。
+// 尽早调用，避免开窗瞬间先闪一下暗底。
+function applyTheme() {
+  const root = document.documentElement;
+  if (settings.light) root.setAttribute("data-theme", "light");
+  else root.removeAttribute("data-theme");
+}
+applyTheme();
 
 // ============================ 通知：闪烁 + 提示音 + 系统 toast ============================
 let primed = false; // 首帧先给每行“打底”状态，之后的变化才触发通知（避免开面板瞬间刷一屏）
@@ -479,6 +488,16 @@ menuEl.addEventListener("click", async (e) => {
   saveSettings();
 
   if (k === "notify" && settings.notify) ensureNotifyPerm();
+  if (k === "light") applyTheme();
+});
+
+// 两个窗口（dock / popover）共享 localStorage：一处切主题，另一处收到 storage 事件后同步，
+// 无需重启即保持一致。
+window.addEventListener("storage", (e) => {
+  if (e.key !== "cm.settings") return;
+  settings = loadSettings();
+  applyTheme();
+  reflectMenu();
 });
 
 // ============================ 卡片右键菜单 ============================
