@@ -573,9 +573,52 @@ function unlockAudio() {
 }
 window.addEventListener("pointerdown", unlockAudio);
 
+// ===================== 采集端安装/升级弹窗 =====================
+// App 自带 hooks 安装：启动时问 Rust「采集端缺不缺 / 版本旧不旧」，缺或旧就弹一次窗，
+// 一键把发射器+桥接铺进 ~/.claude/。只在固定看板(dock)弹，浮窗(popover)不重复弹。
+const installOverlay = document.getElementById("install-overlay");
+async function maybePromptInstall() {
+  if (currentLabel() !== "dock" || !installOverlay) return;
+  let st;
+  try { st = await invoke("hooks_status"); } catch { return; } // 非 Tauri / 命令缺失都静默跳过
+  if (!st || !st.needs_install) return;
+  const body = document.getElementById("install-body");
+  body.textContent = st.first_time
+    ? "还没安装状态采集组件。安装后看板才能显示会话状态与限额用量。"
+    : `采集组件有更新（v${st.installed_version || "旧版"} → v${st.app_version}）。更新后限额 5H/7D、新字段才会生效——光换看板不换采集端是不生效的。`;
+  // 已经接管过状态栏 → 默认仍勾选（重装会幂等刷新，不会重复包裹）
+  document.getElementById("install-statusline").checked = true;
+  document.getElementById("install-msg").classList.add("hidden");
+  installOverlay.classList.remove("hidden");
+}
+document.getElementById("install-later")?.addEventListener("click", () => {
+  installOverlay.classList.add("hidden"); // 本次会话不再打扰；下次启动仍会按版本判断
+});
+document.getElementById("install-go")?.addEventListener("click", async () => {
+  const withStatusline = document.getElementById("install-statusline").checked;
+  const msgEl = document.getElementById("install-msg");
+  const goBtn = document.getElementById("install-go");
+  goBtn.disabled = true;
+  msgEl.classList.remove("hidden");
+  msgEl.classList.remove("err");
+  msgEl.textContent = "安装中…";
+  try {
+    const r = await invoke("install_hooks", { withStatusline });
+    msgEl.textContent = `✓ 已完成（v${r.app_version}）。重启正在运行的 Claude Code 会话后生效。`;
+    tickUsage(); // 桥接被下次 statusline 调用才写文件，这里先刷一下用量显示
+    setTimeout(() => installOverlay.classList.add("hidden"), 2800);
+  } catch (e) {
+    msgEl.classList.add("err");
+    msgEl.textContent = "✗ 失败：" + (e?.message || e);
+  } finally {
+    goBtn.disabled = false;
+  }
+});
+
 // ============================ 启动 ============================
 if (settings.notify) ensureNotifyPerm();
 tick();
 setInterval(tick, 1000);
 tickUsage();
 setInterval(tickUsage, 30000); // 用量变化慢，30s 拉一次即可，避免每秒全盘扫日志
+maybePromptInstall(); // 采集端缺/旧就弹窗（仅 dock）

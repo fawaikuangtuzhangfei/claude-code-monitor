@@ -44,6 +44,23 @@
         <button class="menu-item" data-k="autostart"><span class="mi-ico">⏻</span><span class="mi-label">开机自启</span><span class="mi-sw"></span></button>
       </div>
 
+      <!-- 采集端安装/升级弹窗：App 检测到 hooks 缺失或版本落后时弹出（仅固定看板 dock 弹一次） -->
+      <div id="install-overlay" class="install-overlay hidden">
+        <div class="install-card">
+          <div class="install-title">更新采集组件</div>
+          <div id="install-body" class="install-body"></div>
+          <label class="install-opt">
+            <input type="checkbox" id="install-statusline" checked />
+            <span>接管状态栏以显示限额 %（5H / 7D，终端显示不变）</span>
+          </label>
+          <div id="install-msg" class="install-msg hidden"></div>
+          <div class="install-actions">
+            <button id="install-later" class="install-btn ghost">以后再说</button>
+            <button id="install-go" class="install-btn primary">安装 / 更新</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 卡片右键菜单 -->
       <div id="ctx" class="ctx hidden">
         <button class="ctx-item" data-a="focus">切到该终端</button>

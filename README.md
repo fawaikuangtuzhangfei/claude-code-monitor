@@ -114,17 +114,19 @@ pnpm tauri build
 
 ## 更新 / 升级
 
-看板（GUI）和 hooks（状态采集）是两个独立部分，升级时**都要更新**：
+看板（GUI）和 hooks（状态采集）是两个独立部分，升级时**都要更新**。
 
-1. **升级看板**：从 [Releases](https://github.com/fawaikuangtuzhangfei/claude-code-monitor/releases/latest) 下最新安装包。
-   - 先在系统托盘右键 → **退出**（否则安装时旧 exe 被占用会报错）。
-   - Windows 双击 `*-setup.exe` 覆盖安装；macOS 打开 `.dmg` 覆盖 —— 应用标识不变，原地升级、保留你的设置。
-2. **升级 hooks**：拉最新代码后**重跑一次**，把新版发射器复制进 `~/.claude/monitor-hooks/`：
-   ```bash
-   node install/install-hooks.mjs
-   ```
-   > hook 里的新字段（如 git 分支、已等待时长）靠更新后的发射器产出，光换看板不换 hooks 是不生效的。
-   > 脚本幂等：已存在的 hook 会跳过，`settings.json` 自动备份。**重启正在跑的 Claude 会话**后新字段才上报。
+**升级看板**：从 [Releases](https://github.com/fawaikuangtuzhangfei/claude-code-monitor/releases/latest) 下最新安装包。
+- 先在系统托盘右键 → **退出**（否则安装时旧 exe 被占用会报错）。
+- Windows 双击 `*-setup.exe` 覆盖安装；macOS 打开 `.dmg` 覆盖 —— 应用标识不变，原地升级、保留你的设置。
+
+**升级 hooks**：新版看板启动时会**自动探测采集端版本**，缺失或落后就弹窗一键更新（发射器 + statusline 桥接都编译进了 App，无需装 Node、不用跑脚本）。点「安装 / 更新」即可，`settings.json` 会自动备份。
+
+> 仍想手动装/在无 GUI 环境装，可拉最新代码重跑（幂等，自动备份）：
+> ```bash
+> node install/install-hooks.mjs
+> ```
+> 两种方式效果一致。**重启正在跑的 Claude 会话**后，新字段与限额 % 才会上报。
 
 ## 使用
 

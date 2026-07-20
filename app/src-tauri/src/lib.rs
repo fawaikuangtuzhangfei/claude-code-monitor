@@ -6,6 +6,8 @@ use tauri::{
     Manager,
 };
 
+mod install; // 看板自带的 hooks 安装/升级（hooks_status / install_hooks）
+
 /// 读取 ~/.claude/monitor/*.json，每个文件是一个会话的状态
 #[tauri::command]
 fn list_sessions() -> Vec<Value> {
@@ -826,7 +828,9 @@ pub fn run() {
             set_win_height,
             set_tray_status,
             get_autostart,
-            set_autostart
+            set_autostart,
+            install::hooks_status,
+            install::install_hooks
         ])
         .setup(|app| {
             // 浮窗失焦自动收起用的时间戳，供托盘点击守卫读取
