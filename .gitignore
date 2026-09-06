@@ -31,3 +31,11 @@ Thumbs.db
 # ── 环境变量 ──
 .env
 .env.*
+
+# ── tools/phone（手机看板实验脚本）──
+# 令牌：首次运行随机生成，是一枚活着的凭证，绝不入库。
+# 本仓库是 public，git 历史永久——凭证一旦提交，之后删文件也仍能从历史翻出来。
+tools/phone/token.txt
+# 降级编译产物：由 build.mjs 从 app/ui/src/main.js 生成，不进仓库，
+# 否则和源码不同步时说不清哪个是真的。clone 后跑一次 `node build.mjs` 即可。
+tools/phone/main.legacy.js
