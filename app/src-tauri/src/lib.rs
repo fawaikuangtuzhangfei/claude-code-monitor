@@ -269,14 +269,14 @@ fn process_alive_macos(pid: i64) -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-/// 点击卡片 -> 把该会话所在的终端窗口切到前台
+/// 点击卡片 -> 把该会话所在的终端窗口切到前台（清洗 id，杜绝路径穿越；规则与 hook 端一致）
 #[tauri::command]
 fn focus_session(session_id: String) -> Result<(), String> {
     let home = dirs::home_dir().ok_or("no home dir")?;
     let path = home
         .join(".claude")
         .join("monitor")
-        .join(format!("{session_id}.json"));
+        .join(format!("{}.json", sanitize_id(&session_id)));
     let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
 

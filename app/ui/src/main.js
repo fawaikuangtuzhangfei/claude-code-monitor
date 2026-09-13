@@ -272,7 +272,7 @@ let forcedHeight = false; // 浮层（设置/右键）把窗口临时撑高时�
 function autosize(n) {
   if (forcedHeight) return; // 别让每秒 tick 把撑高的窗口缩回去，导致浮层又被裁切
   // 量“自然内容高度”：逐行 offsetHeight 累加（不受 flex 拉伸影响，能缩回去）
-  let cards = 16; // #cards 上下 padding 各 8
+  let cards = 18; // #cards 上下 padding 各 9（与 styles.css 的 #cards padding 一致）
   const kids = cardsEl.children;
   for (let i = 0; i < kids.length; i++) cards += kids[i].offsetHeight;
   if (kids.length > 1) cards += (kids.length - 1) * 7; // gap（与 styles.css #cards 的 gap 一致）

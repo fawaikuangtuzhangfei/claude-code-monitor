@@ -148,14 +148,18 @@ claude-code-monitor/
 │  ├─ emit-status.mjs        # 状态发射器（被各 hook 调用，纯 Node 无依赖）
 │  ├─ status-logic.mjs       # 状态机决策核心（纯函数，无 I/O；发射器 import 它）
 │  ├─ status-logic.test.mjs  # 状态转移单测（node --test / npm test）
+│  ├─ statusline-bridge.mjs  # statusline 包一层：透传原命令 + 截获限额%（5H/7D 的唯一来源）
 │  └─ win-capture.ps1        # Windows 终端窗口 HWND 捕获
 ├─ install/install-hooks.mjs # 一键装/卸 hooks（幂等，自动备份 settings.json）
 ├─ app/                      # Tauri 看板
-│  ├─ ui/                    # 前端（原生 JS，无框架）
+│  ├─ ui/                    # 前端（原生 JS，无框架、无构建）
 │  │  ├─ index.html
 │  │  └─ src/{main.js, styles.css}
 │  ├─ gen-icon.mjs, app-icon.png  # 图标源（程序化生成）
-│  └─ src-tauri/             # Rust：置顶透明窗口 + 读 monitor 目录 + 托盘 + 聚焦 + 自启
+│  └─ src-tauri/src/         # Rust
+│     ├─ lib.rs              # 读 monitor 目录 + 双窗口(固定看板/托盘浮窗) + 托盘 + 聚焦 + 自启
+│     └─ install.rs          # 看板自带的 hooks 安装/升级（脚本用 include_str! 编译进二进制）
+├─ tools/phone/              # 实验性：把旧手机当看板显示屏（零依赖 HTTP + ES2015 降级构建）
 └─ README.md
 ```
 

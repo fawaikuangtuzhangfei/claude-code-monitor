@@ -58,9 +58,14 @@ writeFileSync(TMP, src, 'utf8');
 
 // ES2015 + IIFE：连 <script type="module">（Chrome 61+）都不需要
 // Windows 上 npx 是 .cmd，Node 20 起 spawnSync 不再隐式用 shell 跑它，必须显式 shell:true
+//
+// --bundle 是安全网，不是当前需求：main.js 眼下没有任何 import，加不加产物一样。
+// 但少了它，将来一旦把 main.js 拆成多个模块，esbuild **不会报错**——它会安静地产出
+// `(() => { var x = require("./dep.js"); ... })()`，浏览器里 `require is not defined`
+// 直接白屏，而这里照样打印「✓ 已生成」。桌面看板正常、只有手机端白屏，最难定位的那种。
 const r = spawnSync(
   'npx',
-  ['--yes', 'esbuild', `"${TMP}"`, '--target=es2015', '--format=iife', `--outfile="${OUT}"`],
+  ['--yes', 'esbuild', `"${TMP}"`, '--bundle', '--target=es2015', '--format=iife', `--outfile="${OUT}"`],
   { stdio: 'inherit', shell: true }
 );
 
