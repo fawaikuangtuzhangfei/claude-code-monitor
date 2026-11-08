@@ -78,7 +78,7 @@ std::thread::spawn(move || { ... });
 ```rust
 // lib.rs:13    读不到 home / 读不到目录 → 返回空 Vec，UI 显示空态
 // lib.rs:245   读不到 usage-limits.json → 返回 json!({})，UI 退回 token 累加显示
-// lib.rs:150   spawn_blocking 失败 → 返回 { last5h: 0, last24h: 0, updated_at: now }
+// lib.rs:150   spawn_blocking 失败 → 返回 { last5h: 0, last24h: 0, by_model: {}, updated_at: now }
 ```
 
 遍历目录时逐项跳过坏数据，不整体失败：

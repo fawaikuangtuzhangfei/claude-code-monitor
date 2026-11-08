@@ -21,6 +21,7 @@
   --done: #58a6ff;           /* 完成 — 冷蓝 */
   --idle: #4a5262;           /* 空闲 — 灰 */
   --danger: #ff5a5a;         /* 越限告警 — 红 */
+  --fable: #b18cff;          /* Fable 用量芯片 — 紫；和红黄绿的阈值色错开，不会被读成告警 */
 
   /* 表面色阶：收拢散落的 rgba(白)，成一套可复用刻度 */
   --surf-1: rgba(255, 255, 255, 0.022); /* 卡片底 */
@@ -71,6 +72,7 @@
   --done: #0071e3;   /* Apple Blue */
   --idle: #8e8e93;   /* systemGray */
   --danger: #d70015; /* systemRed（深） */
+  --fable: #6b34d4;  /* systemPurple（深）：白底也读得出 */
 
   /* 白色半透明表面在浅底会「隐身」，翻成极淡的黑色半透明（苹果的分层灰） */
   --surf-1: rgba(0, 0, 0, 0.02);
@@ -375,10 +377,25 @@ html, body {
 }
 .u-reset-none { color: var(--ink-faint); background: transparent; border-color: transparent; }
 
-/* token 退回模式：无百分比，只显示标签 + 数值 */
-.u-gauge-tok { grid-template-columns: 30px auto auto; justify-content: start; gap: 8px; }
-.u-gauge-tok .u-pct { color: var(--ink); min-width: 0; font-size: 14px; }
+/* token 退回模式：无百分比，只显示标签 + 数值（+ 可选的 FABLE 芯片） */
+.u-gauge-tok { grid-template-columns: 30px auto auto auto; justify-content: start; gap: 8px; }
+.u-gauge-tok .u-pct { color: var(--ink); min-width: 6ch; font-size: 14px; } /* 等宽右对齐，两排的 TOK / FABLE 芯片才能上下对齐 */
 .u-tok-unit { font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--ink-dim); }
+
+/* FABLE 芯片：独立限额的模型单独点名。紫色和 5H/7D 的红黄绿阈值色错开，
+   不会被误读成告警等级；只有 24h 内真用过 Fable 才渲染。 */
+.u-model {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  font-size: 11px; font-weight: 700; color: var(--ink); white-space: nowrap;
+  padding: 2px 7px; border-radius: 5px;
+  background: color-mix(in srgb, var(--fable) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fable) 38%, transparent);
+}
+.u-model b { font-size: 9px; font-weight: 800; letter-spacing: 1px; color: var(--fable); }
+/* limits 模式下的第三排：FABLE · 5H 值 · 24H 值 · TOK */
+.u-gauge-model { grid-template-columns: auto auto auto auto; justify-content: start; gap: 8px; }
+.u-model-win { font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--ink-dim); white-space: nowrap; }
+.u-model-win em { font-style: normal; font-size: 13px; font-weight: 800; letter-spacing: 0.3px; color: var(--ink); margin-left: 4px; }
 
 /* —— 状态变化闪烁（通知视觉）：叠一层描边脉冲，不改布局 —— */
 .row.flash-wait { animation: flashwait 1s ease-out 3; }

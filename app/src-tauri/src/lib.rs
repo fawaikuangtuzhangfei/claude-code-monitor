@@ -140,6 +140,8 @@ fn iso8601_to_ms(s: &str) -> Option<i64> {
 ///   - mtime 门控：24 小时内没改动过的文件整体跳过，避免每次都全盘扫历史日志。
 ///   - 滚动窗口而非“本地今日”：规避本地时区/夏令时的 midnight 计算，也让深夜看数更直觉。
 ///   - 全量重扫（不缓存字节偏移）：文件被 /clear 换 inode 或截断都无所谓，天然无偏移量 bug。
+///   - 按 message.model 分桶（by_model）：Fable 等模型有独立限额，总量看不出它用了多少；
+///     后端只分桶不做归并，哪些模型算"一家"由前端决定，免得每出一个新模型都要改 Rust。
 /// Tauri 命令入口：把重活（扫目录 + 读大文件 + 解析）丢到阻塞线程池，绝不占主线程。
 /// 同步命令在 Tauri v2 会跑在主线程上，扫到 28MB transcript 时足以卡住 UI；故这里用
 /// async + spawn_blocking 把它挪走。
@@ -147,27 +149,35 @@ fn iso8601_to_ms(s: &str) -> Option<i64> {
 async fn get_usage() -> Value {
     tauri::async_runtime::spawn_blocking(scan_usage)
         .await
-        .unwrap_or_else(|_| serde_json::json!({ "last5h": 0, "last24h": 0, "updated_at": now_ms() }))
+        .unwrap_or_else(|_| {
+            serde_json::json!({ "last5h": 0, "last24h": 0, "by_model": {}, "updated_at": now_ms() })
+        })
 }
 
 fn scan_usage() -> Value {
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashSet};
     let now = now_ms();
     let t5 = now - 5 * 3600 * 1000;
     let t24 = now - 24 * 3600 * 1000;
     let mut u5: u64 = 0;
     let mut u24: u64 = 0;
+    // 模型 -> (近 5h, 近 24h)。BTreeMap 让输出顺序稳定，便于肉眼比对
+    let mut by_model: BTreeMap<String, (u64, u64)> = BTreeMap::new();
 
-    let result = |five: u64, day: u64| -> Value {
-        serde_json::json!({ "last5h": five, "last24h": day, "updated_at": now })
+    let result = |five: u64, day: u64, models: &BTreeMap<String, (u64, u64)>| -> Value {
+        let by_model: serde_json::Map<String, Value> = models
+            .iter()
+            .map(|(m, (f, d))| (m.clone(), serde_json::json!({ "last5h": f, "last24h": d })))
+            .collect();
+        serde_json::json!({ "last5h": five, "last24h": day, "by_model": by_model, "updated_at": now })
     };
 
     let Some(home) = dirs::home_dir() else {
-        return result(0, 0);
+        return result(0, 0, &by_model);
     };
     let root = home.join(".claude").join("projects");
     let Ok(projects) = fs::read_dir(&root) else {
-        return result(0, 0);
+        return result(0, 0, &by_model);
     };
 
     let mut seen: HashSet<String> = HashSet::new(); // message.id 去重（滚动窗口内数量有限）
@@ -231,10 +241,20 @@ fn scan_usage() -> Value {
                 if ts >= t5 {
                     u5 += total;
                 }
+                // 没写 model 的旧日志归到 "unknown"，总量不丢、分桶也对得上账
+                let model = msg
+                    .get("model")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("unknown");
+                let slot = by_model.entry(model.to_string()).or_insert((0, 0));
+                slot.1 += total;
+                if ts >= t5 {
+                    slot.0 += total;
+                }
             }
         }
     }
-    result(u5, u24)
+    result(u5, u24, &by_model)
 }
 
 /// 读取 statusline 桥接抓到的限额数据（~/.claude/monitor/usage-limits.json）。

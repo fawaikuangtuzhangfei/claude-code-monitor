@@ -343,6 +343,21 @@ function fmtTokens(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
   return String(n);
 }
+// 哪些模型算「Fable 一家」：Fable 5.1 与 Mythos 5.1 同底模、同一条限额，合并计。
+// 后端只按 message.model 原样分桶，归并规则放这里——新模型出现只改这一行。
+const FABLE_MODEL_RE = /fable|mythos/i;
+// 从 by_model 分桶里把 Fable 家的 5h/24h 加总；没分桶（旧后端）返回 null，UI 据此不画
+function fableOf(u) {
+  const bm = u && u.by_model;
+  if (!bm || typeof bm !== "object") return null;
+  let last5h = 0, last24h = 0;
+  for (const [model, v] of Object.entries(bm)) {
+    if (!FABLE_MODEL_RE.test(model) || !v) continue;
+    last5h += Number(v.last5h) || 0;
+    last24h += Number(v.last24h) || 0;
+  }
+  return { last5h, last24h };
+}
 // 百分比配色：<50 稳、50~80 注意、>=80 告警
 function pctClass(p) {
   return p >= 80 ? "u-danger" : p >= 50 ? "u-warn" : "u-ok";
@@ -357,7 +372,8 @@ function fmtReset(sec) {
 }
 
 // 数据每 30s 取一次缓存在这里；倒计时每秒用缓存重算，不重复取数/扫盘。
-let usageState = null; // { mode:"limits", rl } | { mode:"tokens", u } | null
+// u（transcript 累加）两种模式都带：limits 模式靠它补 Fable 读数（限额载荷里没有分模型字段）。
+let usageState = null; // { mode:"limits", rl, u } | { mode:"tokens", u } | null
 
 // 一排限额仪表：标签 · 刻度条(填充=占比) · 读数 · 重置倒计时
 function gaugeRow(label, w) {
@@ -376,34 +392,56 @@ function gaugeRow(label, w) {
     `</div>`;
 }
 
+// Fable 读数只在 24h 内真用过时才画：没用 Fable 的人不该多出一块永远是 0 的芯片。
+// 限额载荷里没有分模型百分比，所以 Fable 只能给 token 数，不给 %。
+function fableChip(f) {
+  return `<span class="u-model" title="Fable / Mythos 近窗口 token 用量（独立限额，无百分比）">` +
+    `<b>FABLE</b>${fmtTokens(f)}</span>`;
+}
+
 function renderUsage() {
   if (!usageState) { usageEl.classList.add("hidden"); return; }
+  const fb = fableOf(usageState.u);
+  const showFable = !!(fb && fb.last24h);
   if (usageState.mode === "limits") {
     const rl = usageState.rl, lim = rl.rate_limits;
     // 只显示 5H / 7D 占限额百分比。花费($)刻意不显示：usage-limits.json 全局一份，
     // 谁的 statusline 最后刷新就覆盖成谁的 total_cost_usd，多开时会来回跳，参考意义低。
-    usageEl.innerHTML = [gaugeRow("5H", lim.five_hour), gaugeRow("7D", lim.seven_day)].filter(Boolean).join("");
+    const rows = [gaugeRow("5H", lim.five_hour), gaugeRow("7D", lim.seven_day)];
+    // 第三排：Fable 的 5H / 24H token 数（限额%拿不到，退一步给绝对量）
+    if (showFable) {
+      rows.push(
+        `<div class="u-gauge u-gauge-model"><span class="u-model"><b>FABLE</b></span>` +
+        `<span class="u-model-win">5H<em>${fmtTokens(fb.last5h)}</em></span>` +
+        `<span class="u-model-win">24H<em>${fmtTokens(fb.last24h)}</em></span>` +
+        `<span class="u-tok-unit">TOK</span></div>`,
+      );
+    }
+    usageEl.innerHTML = rows.filter(Boolean).join("");
     usageEl.classList.remove("hidden");
   } else {
     const u = usageState.u;
-    const tok = (label, n) =>
+    const tok = (label, n, f) =>
       `<div class="u-gauge u-gauge-tok"><span class="u-glabel">${label}</span>` +
-      `<span class="u-pct">${fmtTokens(n)}</span><span class="u-tok-unit">TOK</span></div>`;
-    usageEl.innerHTML = tok("5H", u.last5h) + tok("24H", u.last24h);
+      `<span class="u-pct">${fmtTokens(n)}</span><span class="u-tok-unit">TOK</span>` +
+      (showFable ? fableChip(f) : "") + `</div>`;
+    usageEl.innerHTML = tok("5H", u.last5h, fb && fb.last5h) + tok("24H", u.last24h, fb && fb.last24h);
     usageEl.classList.remove("hidden");
   }
 }
 
-// 30s 取一次数据：优先真实限额%，缺失退回 token 累加
+// 30s 取一次数据：优先真实限额%，缺失退回 token 累加。
+// transcript 累加两种模式都取——limits 模式也要靠它显示 Fable 用量。
 async function tickUsage() {
   try {
     let rl = null;
     try { rl = await invoke("get_rate_limits"); } catch {}
+    let u = null;
+    try { u = await invoke("get_usage"); } catch {}
     const lim = rl && rl.rate_limits;
     if (lim && (lim.five_hour || lim.seven_day)) {
-      usageState = { mode: "limits", rl };
+      usageState = { mode: "limits", rl, u };
     } else {
-      const u = await invoke("get_usage");
       usageState = u && (u.last5h || u.last24h) ? { mode: "tokens", u } : null;
     }
   } catch {

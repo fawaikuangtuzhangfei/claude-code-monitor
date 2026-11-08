@@ -101,7 +101,7 @@ if (key === lastHeaderKey) return;
 | 循环 | 间隔 | 取什么 | 理由 |
 |---|---|---|---|
 | `tick()` | 1000ms | `list_sessions` | 状态要跟手；计时器每秒走字 |
-| `tickUsage()` | 30000ms | `get_rate_limits` → 缺失则 `get_usage` | `main.js:623`：用量变化慢，30s 拉一次即可，避免每秒全盘扫日志 |
+| `tickUsage()` | 30000ms | `get_rate_limits` + `get_usage`（两者都取） | `main.js:623`：用量变化慢，30s 拉一次即可，避免每秒全盘扫日志 |
 
 用量条的**数据**每 30s 取一次缓存在 `usageState`，**倒计时每秒用缓存重算**（`main.js:334` 在 `tick()` 末尾调 `renderUsage()`），不重复取数/扫盘。这个"慢取数 + 快重绘"的分离是刻意的，别把 `fmtReset` 的重算挪回 30s 循环里。
 
@@ -109,9 +109,13 @@ if (key === lastHeaderKey) return;
 
 ```
 get_rate_limits → 有 rate_limits.five_hour/seven_day → mode "limits"（真实限额 %）
-              → 否则 get_usage → 有非零值 → mode "tokens"（本地 transcript 累加）
+              → 否则 get_usage 有非零值 → mode "tokens"（本地 transcript 累加）
               → 否则 null → 隐藏用量条
 ```
+
+`get_usage` 两种模式都要取：它的 `by_model` 分桶是 **Fable 用量**的唯一来源（限额载荷里没有分模型字段）。
+哪些模型算"Fable 一家"由前端 `FABLE_MODEL_RE`（`fable|mythos`）决定，后端只按 `message.model` 原样分桶；
+Fable 读数只在近 24h 非零时渲染，没用过 Fable 的人不会多出一块永远是 0 的芯片。
 
 `cost`（$）刻意不显示，理由写在 `main.js:383`：`usage-limits.json` 全局一份，多开时会来回跳。
 
